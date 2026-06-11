@@ -29,7 +29,7 @@ def verify_signature(body: bytes, signature: str) -> bool:
 
 
 def ask_hashimoto(user_text: str) -> str:
-    prompt = f"{SYSTEM_PROMPT}\n\nユーザー: {user_text}\nAI橋本:"
+    prompt = f"{SYSTEM_PROMPT}\n\nユーザー: {user_text}\nあらくん:"
 
     try:
         response = client.models.generate_content(
@@ -86,7 +86,7 @@ def callback():
         user_text = message.get("text", "")
         reply_token = event.get("replyToken")
 
-        ai_text = ask_arakun(user_text)
+        ai_text = ask_hashimoto(user_text)
         reply_to_line(reply_token, ai_text)
 
     return "OK"
