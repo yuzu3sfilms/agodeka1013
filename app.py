@@ -32,7 +32,7 @@ def ask_arakun(user_text: str) -> str:
     prompt = f"{SYSTEM_PROMPT}\n\nユーザー: {user_text}\nあらくん:"
 
     response = client.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-3.5-flash",
         contents=prompt
     )
 
