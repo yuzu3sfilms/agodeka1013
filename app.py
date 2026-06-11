@@ -2,7 +2,7 @@ import os
 import hmac
 import hashlib
 import base64
-import re
+import unicodedata
 import requests
 from flask import Flask, request, abort
 from openai import OpenAI
@@ -20,111 +20,62 @@ client = OpenAI(
 
 PROMPT_FILE = "AGODEKA1013_PROMPT.txt"
 TRIGGER_FILE = "arakun_triggers.txt"
-EXAMPLES_FILE = "arakun_style_examples.txt"
 
 with open(PROMPT_FILE, "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
+try:
+    with open(TRIGGER_FILE, "r", encoding="utf-8") as f:
+        TRIGGER_WORDS = [
+            line.strip()
+            for line in f
+            if line.strip() and not line.startswith("#")
+        ]
+except FileNotFoundError:
+    TRIGGER_WORDS = []
 
-def load_lines(path, fallback):
-    try:
-        rows = []
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                rows.append(line)
-        return rows or fallback
-    except FileNotFoundError:
-        return fallback
+DEFAULT_TRIGGERS = [
+    "あらくん",
+    "橋本",
+    "顎",
+    "アゴ",
+    "AGODEKA",
+    "きゃぴい",
+    "きゃぴぃ",
+    "キャピい",
+    "キャピイ",
+    "キャピィ",
+    "かわいいでしょ",
+    "ぼくぅ",
+    "フリーポーズ",
+    "表情",
+    "無理ゲー",
+    "難しいです",
+    "あはい",
+    "お願いします",
+    "牛角多すぎます",
+    "地図はからっきし",
+    "美味しいよ",
+    "いきなりステーキ",
+]
 
-
-TRIGGER_WORDS = load_lines(
-    TRIGGER_FILE,
-    ["あらくん", "橋本", "顎", "アゴ", "AGODEKA", "美味しいよ", "難しいです", "あはい"]
-)
-
-RAW_EXAMPLES = load_lines(
-    EXAMPLES_FILE,
-    [
-        "core_quote\tあはい",
-        "core_quote\t難しいです…",
-        "core_quote\t美味しいよ！",
-    ]
-)
-
-
-def parse_examples():
-    examples = []
-    for row in RAW_EXAMPLES:
-        if "\t" in row:
-            category, text = row.split("\t", 1)
-        else:
-            category, text = "example", row
-        examples.append({"category": category, "text": text})
-    return examples
-
-
-STYLE_EXAMPLES = parse_examples()
+TRIGGER_WORDS = list(set(TRIGGER_WORDS + DEFAULT_TRIGGERS))
 
 
 def normalize_text(text: str) -> str:
-    return text.lower().replace("　", " ").strip()
+    text = unicodedata.normalize("NFKC", text)
+    text = text.lower()
+    text = text.replace(" ", "").replace("　", "")
+    return text
 
 
-def should_respond(user_text: str) -> bool:
-    normalized = normalize_text(user_text)
-    return any(normalize_text(word) in normalized for word in TRIGGER_WORDS)
+def should_reply(user_text: str) -> bool:
+    normalized_user_text = normalize_text(user_text)
 
-
-def tokenize_ja(text: str):
-    text = normalize_text(text)
-    # Japanese-friendly rough tokens: chunks of letters/numbers plus 2-char slices
-    words = re.findall(r"[a-z0-9A-Zぁ-んァ-ン一-龥ー]+", text)
-    chars = [text[i:i+2] for i in range(max(0, len(text)-1))]
-    return set(words + chars)
-
-
-def select_style_examples(user_text: str, limit: int = 8):
-    user_tokens = tokenize_ja(user_text)
-    scored = []
-    for ex in STYLE_EXAMPLES:
-        text = ex["text"]
-        tokens = tokenize_ja(text)
-        score = len(user_tokens & tokens)
-        # category boosts
-        if any(k in user_text for k in ["筋", "ベンチ", "デッド", "スクワット", "ジム", "ダイエット"]):
-            if ex["category"] == "training":
-                score += 5
-        if any(k in user_text for k in ["食", "寿司", "ラーメン", "酒", "美味"]):
-            if ex["category"] == "food":
-                score += 5
-        if any(k in user_text for k in ["どこ", "駅", "出口", "待ち合わせ", "着いた"]):
-            if ex["category"] == "confused_location":
-                score += 5
-        if any(k in user_text for k in ["あらくん", "橋本", "顎", "アゴ"]):
-            if ex["category"] in ["core_quote", "greeting_short"]:
-                score += 4
-        if score > 0:
-            scored.append((score, len(text), ex))
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    chosen = [x[2] for x in scored[:limit]]
-    if not chosen:
-        chosen = STYLE_EXAMPLES[:min(limit, len(STYLE_EXAMPLES))]
-    return chosen
-
-
-def build_user_prompt(user_text: str) -> str:
-    examples = select_style_examples(user_text)
-    example_text = "\n".join([f"- ({ex['category']}) {ex['text']}" for ex in examples])
-    return f"""ユーザー発言:
-{user_text}
-
-文体参照例（内容を丸写しせず、語尾・短さ・テンションだけ寄せる）:
-{example_text}
-
-上の参照例に忠実なAIあらくんとして、1〜3文で返答してください。"""
+    return any(
+        normalize_text(word) in normalized_user_text
+        for word in TRIGGER_WORDS
+    )
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
@@ -133,25 +84,76 @@ def verify_signature(body: bytes, signature: str) -> bool:
         body,
         hashlib.sha256
     ).digest()
+
     expected_signature = base64.b64encode(hash_digest).decode("utf-8")
     return hmac.compare_digest(expected_signature, signature)
 
 
+def shorten_arakun(text: str) -> str:
+    if not text:
+        return "難しいです…。"
+
+    text = text.strip()
+
+    banned_starts = [
+        "こんにちは！",
+        "お話しできて嬉しい",
+        "何かお手伝い",
+        "もちろんです",
+        "わかりました",
+    ]
+
+    for phrase in banned_starts:
+        text = text.replace(phrase, "")
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    text = "\n".join(lines[:2])
+
+    return text[:120] if text else "あはい…"
+
+
 def ask_arakun(user_text: str) -> str:
+    arakun_prompt = SYSTEM_PROMPT + """
+
+# 最重要追加ルール
+親切なAIとして振る舞わない。
+質問に全部答えようとしない。
+真面目に解説しない。
+有益なアドバイスを無理に出さない。
+返答は最大2文。
+120文字以内。
+箇条書き禁止。
+ChatGPTっぽい挨拶禁止。
+
+困ったら以下のように短く返す。
+「あはい…」
+「難しいです。」
+「無理ゲー(；´д⊂)」
+「牛角多すぎます」
+
+同じ単語を繰り返してもよい。
+話題が少しズレてもよい。
+"""
+
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt(user_text)}
+                {
+                    "role": "system",
+                    "content": arakun_prompt
+                },
+                {
+                    "role": "user",
+                    "content": user_text
+                }
             ],
-            temperature=0.65,
-            top_p=0.9,
-            max_tokens=180
+            temperature=1.2,
+            max_tokens=80
         )
 
         text = response.choices[0].message.content
-        return text[:4900] if text else "難しいです…。"
+        return shorten_arakun(text)
 
     except Exception as e:
         print("Groq error:", e)
@@ -160,20 +162,31 @@ def ask_arakun(user_text: str) -> str:
 
 def reply_to_line(reply_token: str, text: str):
     url = "https://api.line.me/v2/bot/message/reply"
+
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
     }
-    data = {"replyToken": reply_token, "messages": [{"type": "text", "text": text}]}
+
+    data = {
+        "replyToken": reply_token,
+        "messages": [
+            {
+                "type": "text",
+                "text": text
+            }
+        ]
+    }
 
     response = requests.post(url, headers=headers, json=data, timeout=10)
+
     if response.status_code >= 300:
         print("LINE reply error:", response.status_code, response.text)
 
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Arakun Bot v3 is running."
+    return "AI Arakun Bot is running."
 
 
 @app.route("/callback", methods=["POST"])
@@ -200,7 +213,7 @@ def callback():
         if not reply_token:
             continue
 
-        if not should_respond(user_text):
+        if not should_reply(user_text):
             continue
 
         ai_text = ask_arakun(user_text)
@@ -210,4 +223,7 @@ def callback():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8080))
+    )
