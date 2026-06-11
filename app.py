@@ -105,13 +105,18 @@ def callback():
             continue
 
         user_text = message.get("text", "")
-        reply_token = event.get("replyToken")
+reply_token = event.get("replyToken")
 
-        if not reply_token:
-            continue
+if not reply_token:
+    continue
 
-        ai_text = ask_arakun(user_text)
-        reply_to_line(reply_token, ai_text)
+trigger_words = ["あらくん", "橋本", "顎"]
+
+if not any(word in user_text for word in trigger_words):
+    continue
+
+ai_text = ask_arakun(user_text)
+reply_to_line(reply_token, ai_text)
 
     return "OK"
 
