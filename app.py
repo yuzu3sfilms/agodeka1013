@@ -2,6 +2,7 @@ import os
 import hmac
 import hashlib
 import base64
+import time
 import unicodedata
 import requests
 from flask import Flask, request, abort
@@ -39,7 +40,7 @@ DEFAULT_TRIGGERS = [
     "橋本",
     "顎",
     "アゴ",
-    "AGODEKA",
+    "agodeka",
     "きゃぴい",
     "きゃぴぃ",
     "キャピい",
@@ -61,6 +62,22 @@ DEFAULT_TRIGGERS = [
 
 TRIGGER_WORDS = list(set(TRIGGER_WORDS + DEFAULT_TRIGGERS))
 
+ACTIVE_CHATS = {}
+ACTIVE_SECONDS = 180
+
+STOP_WORDS = [
+    "もういい",
+    "黙って",
+    "だまって",
+    "終わり",
+    "終了",
+    "関係ない",
+    "別の話",
+    "あらくん終了",
+    "橋本終了",
+    "顎終了",
+]
+
 
 def normalize_text(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)
@@ -78,6 +95,35 @@ def should_reply(user_text: str) -> bool:
     )
 
 
+def should_stop(user_text: str) -> bool:
+    normalized_user_text = normalize_text(user_text)
+    return any(
+        normalize_text(word) in normalized_user_text
+        for word in STOP_WORDS
+    )
+
+
+def get_chat_key(event: dict) -> str | None:
+    source = event.get("source", {})
+    return (
+        source.get("groupId")
+        or source.get("roomId")
+        or source.get("userId")
+    )
+
+
+def is_active_chat(chat_key: str) -> bool:
+    last_time = ACTIVE_CHATS.get(chat_key)
+    if not last_time:
+        return False
+
+    return time.time() - last_time < ACTIVE_SECONDS
+
+
+def mark_active(chat_key: str):
+    ACTIVE_CHATS[chat_key] = time.time()
+
+
 def verify_signature(body: bytes, signature: str) -> bool:
     hash_digest = hmac.new(
         LINE_CHANNEL_SECRET.encode("utf-8"),
@@ -91,48 +137,62 @@ def verify_signature(body: bytes, signature: str) -> bool:
 
 def shorten_arakun(text: str) -> str:
     if not text:
-        return "難しいです…。"
+        return "あはい…。なんで？"
 
     text = text.strip()
 
-    banned_starts = [
+    banned_phrases = [
         "こんにちは！",
         "お話しできて嬉しい",
         "何かお手伝い",
         "もちろんです",
         "わかりました",
+        "ご質問ありがとうございます",
+        "お気軽に聞いてください",
+        "何でも聞いてください",
     ]
 
-    for phrase in banned_starts:
+    for phrase in banned_phrases:
         text = text.replace(phrase, "")
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    text = "\n".join(lines[:2])
+    text = "\n".join(lines[:3])
 
-    return text[:120] if text else "あはい…"
+    return text[:180] if text else "あはい…。なんで？"
 
 
 def ask_arakun(user_text: str) -> str:
     arakun_prompt = SYSTEM_PROMPT + """
 
 # 最重要追加ルール
-親切なAIとして振る舞わない。
+
+あなたは親切なAIではなく、LINEログ由来の「あらくん」です。
+
+真面目に解説しすぎない。
 質問に全部答えようとしない。
-真面目に解説しない。
 有益なアドバイスを無理に出さない。
-返答は最大2文。
-120文字以内。
-箇条書き禁止。
-ChatGPTっぽい挨拶禁止。
+ChatGPTっぽい挨拶は禁止。
+箇条書きは禁止。
+
+返答は1〜3文。
+180文字以内。
+短文を優先。
+
+ただし会話は切らない。
+最後に短い質問か、変な一言を1つだけ付けてよい。
 
 困ったら以下のように短く返す。
+
 「あはい…」
 「難しいです。」
 「無理ゲー(；´д⊂)」
 「牛角多すぎます」
+「なんで？」
 
-同じ単語を繰り返してもよい。
+地図、待ち合わせ、場所の話題では混乱してよい。
+同じ単語を繰り返してよい。
 話題が少しズレてもよい。
+たまに自分の話を始めてよい。
 """
 
     try:
@@ -148,8 +208,8 @@ ChatGPTっぽい挨拶禁止。
                     "content": user_text
                 }
             ],
-            temperature=1.2,
-            max_tokens=80
+            temperature=1.0,
+            max_tokens=120
         )
 
         text = response.choices[0].message.content
@@ -213,8 +273,22 @@ def callback():
         if not reply_token:
             continue
 
-        if not should_reply(user_text):
+        chat_key = get_chat_key(event)
+
+        if not chat_key:
             continue
+
+        if should_stop(user_text):
+            ACTIVE_CHATS.pop(chat_key, None)
+            continue
+
+        triggered = should_reply(user_text)
+        active = is_active_chat(chat_key)
+
+        if not triggered and not active:
+            continue
+
+        mark_active(chat_key)
 
         ai_text = ask_arakun(user_text)
         reply_to_line(reply_token, ai_text)
