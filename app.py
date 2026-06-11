@@ -18,9 +18,40 @@ client = OpenAI(
 )
 
 PROMPT_FILE = "AGODEKA1013_PROMPT.txt"
+TRIGGER_FILE = "arakun_triggers.txt"
 
 with open(PROMPT_FILE, "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
+
+
+def load_triggers():
+    """Load trigger words/phrases from arakun_triggers.txt.
+    Lines starting with # are ignored.
+    """
+    fallback = ["あらくん", "橋本", "顎", "アゴ", "AGODEKA", "美味しいよ", "難しいです", "あはい"]
+    try:
+        with open(TRIGGER_FILE, "r", encoding="utf-8") as f:
+            words = []
+            for line in f:
+                word = line.strip()
+                if not word or word.startswith("#"):
+                    continue
+                words.append(word)
+            return words or fallback
+    except FileNotFoundError:
+        return fallback
+
+
+TRIGGER_WORDS = load_triggers()
+
+
+def normalize_text(text: str) -> str:
+    return text.lower().replace("　", " ").strip()
+
+
+def should_respond(user_text: str) -> bool:
+    normalized = normalize_text(user_text)
+    return any(normalize_text(word) in normalized for word in TRIGGER_WORDS)
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
@@ -105,18 +136,17 @@ def callback():
             continue
 
         user_text = message.get("text", "")
-reply_token = event.get("replyToken")
+        reply_token = event.get("replyToken")
 
-if not reply_token:
-    continue
+        if not reply_token:
+            continue
 
-trigger_words = ["あらくん", "橋本", "顎"]
+        # Only respond when called by name or when a registered quote/trigger appears.
+        if not should_respond(user_text):
+            continue
 
-if not any(word in user_text for word in trigger_words):
-    continue
-
-ai_text = ask_arakun(user_text)
-reply_to_line(reply_token, ai_text)
+        ai_text = ask_arakun(user_text)
+        reply_to_line(reply_token, ai_text)
 
     return "OK"
 
