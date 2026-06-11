@@ -28,16 +28,18 @@ def verify_signature(body: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected_signature, signature)
 
 
-def ask_arakun(user_text: str) -> str:
-    prompt = f"{SYSTEM_PROMPT}\n\nユーザー: {user_text}\nあらくん:"
+def ask_hashimoto(user_text: str) -> str:
+    prompt = f"{SYSTEM_PROMPT}\n\nユーザー: {user_text}\nAI橋本:"
 
-    response = client.models.generate_content(
-        model="gemini-3.5-flash",
-        contents=prompt
-    )
-
-    text = response.text or "難しいです…。"
-    return text[:4900]
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.5-flash-lite",
+            contents=prompt
+        )
+        text = response.text or "難しいです…。"
+        return text[:4900]
+    except Exception:
+        return "難しいです…。ちょっと今混んでるみたいです。お願いします…"
 
 
 def reply_to_line(reply_token: str, text: str):
