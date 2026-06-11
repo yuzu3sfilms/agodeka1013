@@ -14,7 +14,7 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-with open("AI_HASHIMOTO_PROMPT.txt", "r", encoding="utf-8") as f:
+with open("AGODEKA1013_PROMPT.txt", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
 
@@ -28,8 +28,8 @@ def verify_signature(body: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected_signature, signature)
 
 
-def ask_hashimoto(user_text: str) -> str:
-    prompt = f"{SYSTEM_PROMPT}\n\nユーザー: {user_text}\nAI橋本:"
+def ask_arakun(user_text: str) -> str:
+    prompt = f"{SYSTEM_PROMPT}\n\nユーザー: {user_text}\nあらくん:"
 
     response = client.models.generate_content(
         model="gemini-1.5-flash",
@@ -60,7 +60,7 @@ def reply_to_line(reply_token: str, text: str):
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Bot is running."
+    return "Arakun is running."
 
 
 @app.route("/callback", methods=["POST"])
@@ -84,7 +84,7 @@ def callback():
         user_text = message.get("text", "")
         reply_token = event.get("replyToken")
 
-        ai_text = ask_hashimoto(user_text)
+        ai_text = ask_arakun(user_text)
         reply_to_line(reply_token, ai_text)
 
     return "OK"
