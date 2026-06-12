@@ -190,7 +190,7 @@ ChatGPTっぽい挨拶は禁止。箇条書きは禁止。
         return shorten_arakun(response.choices[0].message.content)
     except Exception as e:
         print("Groq error:", e)
-        return "難しいです…。ちょっと今混んでるみたいです。お願いします…"
+        return "難しいです…。"
 
 def reply_to_line(reply_token: str, text: str):
     url = "https://api.line.me/v2/bot/message/reply"
