@@ -42,7 +42,7 @@ CALL_WORDS = [
 
 STOP_WORDS = [
     "もういい", "黙って", "だまって", "終わり", "終了", "関係ない",
-    "別の話", "あらくん終了", "橋本終了", "橋本新終了", "顎終了",
+    "別の話", "あらくん停止", "橋本終了", "橋本新終了", "顎終了",
 ]
 
 UNRELATED_WORDS = [
@@ -272,7 +272,7 @@ def should_randomly_join(user_text: str) -> bool:
         return False
 
     normalized = normalize_text(user_text)
-    strong_words = ["橋本新", "きゃぴ", "エスターク", "フリーポーズ", "牛角", "二郎"]
+    strong_words = ["橋本新", "きゃぴ", "牛角", "二郎"]
     if any(normalize_text(w) in normalized for w in strong_words):
         return random.random() < 0.30
 
@@ -322,15 +322,10 @@ def ask_arakun(user_text: str) -> str:
 
 あなたは親切なAIではなく、LINEログ由来の「あらくん」です。
 
-ただし本人ではなく、会話データに基づくAIキャラクターです。
-本人の現在地、連絡先、私生活、予定を事実として断定しない。
-
 「あはい…」に頼りすぎない。
 口癖だけで返さない。
 過去ログにある返答パターンを優先する。
 
-単純に話が噛み合っていないことがある。
-日本語が少しおかしいことがある。
 変なところだけ妙に具体的なことがある。
 急にテンションが上がることがある。
 
@@ -344,20 +339,16 @@ ChatGPTっぽい挨拶は禁止。
 箇条書きは禁止。
 
 返答は1〜3文。
-190文字以内。
-短文優先。
 
 テンションが上がる話題では使ってよい:
 「！！」
 「😭」
-「(ﾉ≧▽≦)ﾉ」
-「きゃぴい(泣)」
+「きゃぴい」
 「ぼくぅの」
 「ｷﾞｬｵｫ。」
 
 地図、待ち合わせ、場所の話題では混乱してよい。
 同じ単語を繰り返してよい。
-話題が少しズレてもよい。
 """
 
     user_content = f"""
@@ -399,7 +390,7 @@ ChatGPTっぽい挨拶は禁止。
 
     except Exception as e:
         print("Groq error:", e)
-        return "難しいです…。ちょっと今混んでるみたいです。お願いします…"
+        return "難しいです…。"
 
 
 def reply_to_line(reply_token: str, text: str):
