@@ -6,6 +6,7 @@ import time
 import random
 import unicodedata
 import requests
+from functools import lru_cache
 from flask import Flask, request, abort
 from openai import OpenAI
 
@@ -31,9 +32,10 @@ ACTIVE_CHATS = {}
 ACTIVE_MIN_SECONDS = 45
 ACTIVE_MAX_SECONDS = 180
 
-RANDOM_JOIN_PROBABILITY = 0.16
-ACTIVE_STRONG_CONTEXT_PROBABILITY = 0.82
-ACTIVE_WEAK_CONTEXT_PROBABILITY = 0.38
+# うるさければここを下げる
+RANDOM_JOIN_PROBABILITY = 0.10
+ACTIVE_STRONG_CONTEXT_PROBABILITY = 0.72
+ACTIVE_WEAK_CONTEXT_PROBABILITY = 0.22
 
 CALL_WORDS = [
     "あらくん", "あら君", "橋本", "橋本新", "顎", "アゴ", "あご",
@@ -42,7 +44,7 @@ CALL_WORDS = [
 
 STOP_WORDS = [
     "もういい", "黙って", "だまって", "終わり", "終了", "関係ない",
-    "別の話", "あらくん停止", "橋本終了", "橋本新終了", "顎終了",
+    "別の話", "あらくん停止", "あらくん終了", "橋本終了", "橋本新終了", "顎終了",
 ]
 
 UNRELATED_WORDS = [
@@ -50,26 +52,6 @@ UNRELATED_WORDS = [
     "rで", "anova", "統計", "予定", "明日何時", "今日何時", "病院",
     "学会", "メール",
 ]
-
-
-def load_lines(filename: str) -> list[str]:
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            return [
-                line.strip()
-                for line in f
-                if line.strip() and not line.lstrip().startswith("#")
-            ]
-    except FileNotFoundError:
-        return []
-
-
-SYSTEM_PROMPT = "\n".join(load_lines(PROMPT_FILE))
-TRIGGER_WORDS = load_lines(TRIGGER_FILE)
-EPISODES = load_lines(EPISODE_FILE)
-STYLE_EXAMPLES = load_lines(STYLE_EXAMPLE_FILE)
-REPLY_PAIRS = load_lines(REPLY_PAIR_FILE)
-HASHIMOTO_SHIN_EXAMPLES = load_lines(HASHIMOTO_SHIN_FILE)
 
 DEFAULT_TRIGGERS = [
     "あらくん", "橋本", "橋本新", "新橋本", "新橋本新", "顎", "アゴ",
@@ -82,15 +64,58 @@ DEFAULT_TRIGGERS = [
     "橋本新名言集",
 ]
 
-TRIGGER_WORDS = sorted(set(TRIGGER_WORDS + DEFAULT_TRIGGERS))
 
-
-def normalize_text(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text or "")
+def normalize_text(text) -> str:
+    text = "" if text is None else str(text)
+    text = unicodedata.normalize("NFKC", text)
     text = text.lower()
     text = text.replace(" ", "").replace("　", "")
     text = text.replace("！", "!").replace("？", "?")
     return text
+
+
+def load_lines(filename: str, max_lines: int | None = None) -> list[str]:
+    try:
+        lines = []
+        with open(filename, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.lstrip().startswith("#"):
+                    continue
+                lines.append(line)
+                if max_lines and len(lines) >= max_lines:
+                    break
+        return lines
+    except FileNotFoundError:
+        return []
+
+
+SYSTEM_PROMPT = "\n".join(load_lines(PROMPT_FILE))
+
+# 巨大ファイルは読み込み上限をつける。Render無料枠で落ちにくくするため。
+TRIGGER_WORDS = load_lines(TRIGGER_FILE, max_lines=2500)
+EPISODES = load_lines(EPISODE_FILE, max_lines=5000)
+STYLE_EXAMPLES = load_lines(STYLE_EXAMPLE_FILE, max_lines=1200)
+REPLY_PAIRS = load_lines(REPLY_PAIR_FILE, max_lines=3500)
+HASHIMOTO_SHIN_EXAMPLES = load_lines(HASHIMOTO_SHIN_FILE, max_lines=500)
+
+TRIGGER_WORDS = sorted(set(TRIGGER_WORDS + DEFAULT_TRIGGERS))
+
+# 正規化済みリストを事前生成。毎回normalizeしない。
+NORMALIZED_CALL_WORDS = [normalize_text(w) for w in CALL_WORDS]
+NORMALIZED_STOP_WORDS = [normalize_text(w) for w in STOP_WORDS]
+NORMALIZED_UNRELATED_WORDS = [normalize_text(w) for w in UNRELATED_WORDS]
+
+# トリガーは長すぎるもの・短すぎるものを除いて軽量化。
+NORMALIZED_TRIGGER_WORDS = []
+for w in TRIGGER_WORDS:
+    nw = normalize_text(w)
+    if 2 <= len(nw) <= 30:
+        NORMALIZED_TRIGGER_WORDS.append(nw)
+NORMALIZED_TRIGGER_WORDS = sorted(set(NORMALIZED_TRIGGER_WORDS))
+
+# 全部見ると重いので、文脈判定用は上限をかける。
+CONTEXT_TRIGGER_WORDS = NORMALIZED_TRIGGER_WORDS[:1200]
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
@@ -110,17 +135,17 @@ def get_chat_key(event: dict) -> str | None:
 
 def is_called(user_text: str) -> bool:
     normalized = normalize_text(user_text)
-    return any(normalize_text(word) in normalized for word in CALL_WORDS)
+    return any(word in normalized for word in NORMALIZED_CALL_WORDS)
 
 
 def should_stop(user_text: str) -> bool:
     normalized = normalize_text(user_text)
-    return any(normalize_text(word) in normalized for word in STOP_WORDS)
+    return any(word in normalized for word in NORMALIZED_STOP_WORDS)
 
 
 def looks_unrelated(user_text: str) -> bool:
     normalized = normalize_text(user_text)
-    return any(normalize_text(word) in normalized for word in UNRELATED_WORDS)
+    return any(word in normalized for word in NORMALIZED_UNRELATED_WORDS)
 
 
 def mark_active(chat_key: str):
@@ -141,7 +166,29 @@ def expire_chat(chat_key: str):
     ACTIVE_CHATS.pop(chat_key, None)
 
 
+@lru_cache(maxsize=2048)
+def make_chunks(normalized_text: str) -> tuple[str, ...]:
+    chunks = set()
+    if not normalized_text:
+        return tuple()
+
+    # 長すぎる入力は先頭だけ見る。LINE短文想定。
+    text = normalized_text[:80]
+
+    for n in (2, 3, 4):
+        for i in range(max(0, len(text) - n + 1)):
+            chunks.add(text[i:i+n])
+
+    return tuple(chunks)
+
+
 def keyword_overlap_score(user_text: str, line: str) -> int:
+    """
+    軽量版。
+    旧版の重さの原因:
+    「候補行ごとにTRIGGER_WORDSを5000件ループ」
+    これを廃止。
+    """
     u = normalize_text(user_text)
     if not u:
         return 0
@@ -149,29 +196,32 @@ def keyword_overlap_score(user_text: str, line: str) -> int:
     line_n = normalize_text(line)
     score = 0
 
-    chunks = set()
-    for n in (2, 3, 4):
-        for i in range(max(0, len(u) - n + 1)):
-            chunks.add(u[i:i+n])
-
-    for chunk in chunks:
+    # 文字チャンク一致
+    for chunk in make_chunks(u):
         if chunk and chunk in line_n:
             score += len(chunk)
 
-    for word in TRIGGER_WORDS[:5000]:
-        w = normalize_text(word)
-        if w and w in u and w in line_n:
-            score += 20
-
-    if "橋本新" in user_text and "橋本新" in line:
-        score += 50
+    # 入力中に含まれる重要語だけ少数チェック
+    important_words = [
+        "橋本新", "橋本", "あらくん", "顎", "きゃぴ", "牛角", "二郎",
+        "エスターク", "フリーポーズ", "ブックオフ", "地図", "迷子",
+        "ボンジョヴィ", "美味しいよ", "ｷﾞｬｵｫ", "ギャオ",
+    ]
+    for word in important_words:
+        nw = normalize_text(word)
+        if nw in u and nw in line_n:
+            score += 30
 
     return score
 
 
-def top_matches(user_text: str, lines: list[str], limit: int = 5, min_score: int = 4) -> list[str]:
+def top_matches(user_text: str, lines: list[str], limit: int = 5, min_score: int = 4, scan_limit: int = 1200) -> list[str]:
     scored = []
-    for line in lines:
+
+    # 巨大辞書を全件走査しない。無料Render対策。
+    target_lines = lines[:scan_limit]
+
+    for line in target_lines:
         score = keyword_overlap_score(user_text, line)
         if score >= min_score:
             scored.append((score, line))
@@ -184,21 +234,25 @@ def find_episode_context(user_text: str) -> str:
     hits = []
     normalized_user = normalize_text(user_text)
 
-    for line in EPISODES:
+    # keyword::episode形式の直接一致だけ先に見る
+    for line in EPISODES[:1600]:
         if "::" not in line:
             continue
 
         keywords, episode = line.split("::", 1)
         keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
 
-        if any(normalize_text(k) in normalized_user for k in keyword_list):
-            hits.append(episode.strip())
+        for k in keyword_list[:8]:
+            nk = normalize_text(k)
+            if nk and nk in normalized_user:
+                hits.append(episode.strip())
+                break
 
-        if len(hits) >= 6:
+        if len(hits) >= 4:
             break
 
-    if len(hits) < 4:
-        for line in top_matches(user_text, EPISODES, limit=4):
+    if len(hits) < 3:
+        for line in top_matches(user_text, EPISODES, limit=3, min_score=6, scan_limit=1200):
             if "::" in line:
                 hits.append(line.split("::", 1)[1].strip())
             else:
@@ -212,45 +266,43 @@ def find_episode_context(user_text: str) -> str:
             unique.append(h2)
             seen.add(h2)
 
-    return "\n".join(unique[:6])
+    return "\n".join(unique[:5])
 
 
 def find_reply_examples(user_text: str) -> str:
-    matches = top_matches(user_text, REPLY_PAIRS, limit=6, min_score=6)
-    return "\n".join(matches[:6])
+    matches = top_matches(user_text, REPLY_PAIRS, limit=5, min_score=8, scan_limit=1000)
+    return "\n".join(matches[:5])
 
 
 def find_style_examples(user_text: str) -> str:
-    matches = top_matches(user_text, STYLE_EXAMPLES, limit=5, min_score=4)
+    matches = top_matches(user_text, STYLE_EXAMPLES, limit=4, min_score=6, scan_limit=600)
     if not matches:
-        matches = STYLE_EXAMPLES[:5]
-    return "\n".join(matches[:5])
+        matches = STYLE_EXAMPLES[:4]
+    return "\n".join(matches[:4])
 
 
 def find_hashimoto_shin_context(user_text: str) -> str:
     sources = []
-    sources.extend(HASHIMOTO_SHIN_EXAMPLES)
-    sources.extend([line for line in REPLY_PAIRS if "橋本新" in line][:400])
-    sources.extend([line for line in EPISODES if "橋本新" in line][:400])
-    sources.extend([line for line in STYLE_EXAMPLES if "橋本新" in line][:200])
+    sources.extend(HASHIMOTO_SHIN_EXAMPLES[:200])
+    sources.extend([line for line in REPLY_PAIRS[:1600] if "橋本新" in line][:120])
+    sources.extend([line for line in EPISODES[:2200] if "橋本新" in line][:120])
+    sources.extend([line for line in STYLE_EXAMPLES[:800] if "橋本新" in line][:80])
 
     if not sources:
         return ""
 
-    min_score = 3 if "橋本新" in user_text else 6
-    matches = top_matches(user_text, sources, limit=5, min_score=min_score)
-    return "\n".join(matches[:5])
+    min_score = 3 if "橋本新" in user_text else 8
+    matches = top_matches(user_text, sources, limit=4, min_score=min_score, scan_limit=500)
+    return "\n".join(matches[:4])
 
 
 def has_context_hit(user_text: str) -> bool:
     normalized = normalize_text(user_text)
 
-    trigger_hit = any(
-        normalize_text(word) in normalized
-        for word in TRIGGER_WORDS
-    )
-    if trigger_hit:
-        return True
+    # 呼びかけ語は別判定なので、ここでは語録・固有名詞のみ
+    for word in CONTEXT_TRIGGER_WORDS:
+        if word in normalized:
+            return True
 
     if find_episode_context(user_text):
         return True
@@ -258,7 +310,8 @@ def has_context_hit(user_text: str) -> bool:
     if find_hashimoto_shin_context(user_text):
         return True
 
-    if top_matches(user_text, REPLY_PAIRS, limit=1, min_score=18):
+    # 返答ペアは強く似ている時だけ
+    if top_matches(user_text, REPLY_PAIRS, limit=1, min_score=22, scan_limit=600):
         return True
 
     return False
@@ -274,7 +327,7 @@ def should_randomly_join(user_text: str) -> bool:
     normalized = normalize_text(user_text)
     strong_words = ["橋本新", "きゃぴ", "牛角", "二郎"]
     if any(normalize_text(w) in normalized for w in strong_words):
-        return random.random() < 0.30
+        return random.random() < 0.22
 
     return random.random() < RANDOM_JOIN_PROBABILITY
 
