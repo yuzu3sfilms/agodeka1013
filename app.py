@@ -33,9 +33,9 @@ ACTIVE_MIN_SECONDS = 45
 ACTIVE_MAX_SECONDS = 180
 
 # うるさければここを下げる
-RANDOM_JOIN_PROBABILITY = 0.10
-ACTIVE_STRONG_CONTEXT_PROBABILITY = 0.72
-ACTIVE_WEAK_CONTEXT_PROBABILITY = 0.22
+RANDOM_JOIN_PROBABILITY = 0.22
+ACTIVE_STRONG_CONTEXT_PROBABILITY = 0.88
+ACTIVE_WEAK_CONTEXT_PROBABILITY = 0.45
 
 CALL_WORDS = [
     "あらくん", "あら君", "橋本", "橋本新", "顎", "アゴ", "あご",
@@ -115,7 +115,7 @@ for w in TRIGGER_WORDS:
 NORMALIZED_TRIGGER_WORDS = sorted(set(NORMALIZED_TRIGGER_WORDS))
 
 # 全部見ると重いので、文脈判定用は上限をかける。
-CONTEXT_TRIGGER_WORDS = NORMALIZED_TRIGGER_WORDS[:1200]
+CONTEXT_TRIGGER_WORDS = NORMALIZED_TRIGGER_WORDS[:2000]
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
@@ -270,12 +270,12 @@ def find_episode_context(user_text: str) -> str:
 
 
 def find_reply_examples(user_text: str) -> str:
-    matches = top_matches(user_text, REPLY_PAIRS, limit=5, min_score=8, scan_limit=1000)
+    matches = top_matches(user_text, REPLY_PAIRS, limit=5, min_score=7, scan_limit=1200)
     return "\n".join(matches[:5])
 
 
 def find_style_examples(user_text: str) -> str:
-    matches = top_matches(user_text, STYLE_EXAMPLES, limit=4, min_score=6, scan_limit=600)
+    matches = top_matches(user_text, STYLE_EXAMPLES, limit=4, min_score=5, scan_limit=700)
     if not matches:
         matches = STYLE_EXAMPLES[:4]
     return "\n".join(matches[:4])
@@ -311,7 +311,7 @@ def has_context_hit(user_text: str) -> bool:
         return True
 
     # 返答ペアは強く似ている時だけ
-    if top_matches(user_text, REPLY_PAIRS, limit=1, min_score=22, scan_limit=600):
+    if top_matches(user_text, REPLY_PAIRS, limit=1, min_score=16, scan_limit=900):
         return True
 
     return False
@@ -327,7 +327,7 @@ def should_randomly_join(user_text: str) -> bool:
     normalized = normalize_text(user_text)
     strong_words = ["橋本新", "きゃぴ", "牛角", "二郎"]
     if any(normalize_text(w) in normalized for w in strong_words):
-        return random.random() < 0.22
+        return random.random() < 0.38
 
     return random.random() < RANDOM_JOIN_PROBABILITY
 
