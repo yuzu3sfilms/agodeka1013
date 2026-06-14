@@ -432,6 +432,149 @@ def should_continue_active_chat(user_text: str, context_text: str) -> bool:
     return random.random() < ACTIVE_WEAK_CONTEXT_PROBABILITY
 
 
+
+
+def strip_call_words_for_echo(text: str) -> str:
+    normalized = normalize_text(text)
+    for word in NORMALIZED_CALL_WORDS:
+        normalized = normalized.replace(word, "")
+    return normalized
+
+
+def is_echo_reply(user_text: str, reply_text: str) -> bool:
+    """
+    ユーザー発言の単純なおうむ返しを検出する。
+    完全一致、ユーザー文の丸ごと含有、3-gram過剰一致を弾く。
+    """
+    user_core = strip_call_words_for_echo(user_text)
+    reply_norm = normalize_text(reply_text)
+
+    if not user_core or not reply_norm:
+        return False
+
+    if len(user_core) <= 3:
+        return user_core == reply_norm
+
+    if user_core == reply_norm:
+        return True
+
+    if len(user_core) >= 4 and user_core in reply_norm:
+        return True
+
+    if len(reply_norm) <= len(user_core) + 8 and reply_norm in user_core:
+        return True
+
+    chunks = set()
+    for i in range(max(0, len(user_core) - 2)):
+        chunk = user_core[i:i+3]
+        if chunk:
+            chunks.add(chunk)
+
+    if not chunks:
+        return False
+
+    overlap = sum(1 for c in chunks if c in reply_norm)
+    overlap_ratio = overlap / max(1, len(chunks))
+
+    return overlap_ratio >= 0.72 and len(reply_norm) <= len(user_core) + 20
+
+
+def remove_echo_lines(user_text: str, reply_text: str) -> str:
+    user_core = strip_call_words_for_echo(user_text)
+    kept = []
+
+    for line in reply_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        line_norm = normalize_text(line)
+
+        if user_core and len(user_core) >= 4:
+            if line_norm == user_core:
+                continue
+            if user_core in line_norm and len(line_norm) <= len(user_core) + 12:
+                continue
+
+        kept.append(line)
+
+    return "\n".join(kept).strip()
+
+
+def anti_echo_fallback(user_text: str, context_text: str) -> str:
+    """
+    おうむ返しになった時の逃げ。
+    文脈の強い単語に応じて、短くズラした返答を返す。
+    """
+    normalized_context = normalize_text(context_text)
+
+    if normalize_text("橋本新") in normalized_context:
+        return random.choice([
+            "橋本新名言集です。",
+            "ｷﾞｬｵｫ。",
+            "それは橋本新の方です。",
+        ])
+
+    if normalize_text("きゃぴ") in normalized_context:
+        return random.choice([
+            "きゃぴい(泣)",
+            "それは良いです！！",
+            "ぼくぅの表情です。",
+        ])
+
+    if normalize_text("二郎") in normalized_context or normalize_text("野猿") in normalized_context:
+        return random.choice([
+            "二郎に着きました。",
+            "ブックオフのはずが二郎です。",
+            "野猿は難しいです。",
+        ])
+
+    if normalize_text("牛角") in normalized_context:
+        return random.choice([
+            "牛角多すぎます。",
+            "探すのてこずりましたすみませんでした。",
+            "地図はからっきしだめです。",
+        ])
+
+    if normalize_text("エスターク") in normalized_context:
+        return random.choice([
+            "エスターク青くないですか？",
+            "エスタークです！！",
+            "それは通常種ではないです。",
+        ])
+
+    if normalize_text("フリーポーズ") in normalized_context:
+        return random.choice([
+            "フリーポーズお願いします。",
+            "表情が難しいです。",
+            "かわいいでしょ(ﾉ≧▽≦)ﾉ",
+        ])
+
+    if normalize_text("地図") in normalized_context or normalize_text("迷子") in normalized_context:
+        return random.choice([
+            "自分は地図はからっきしだめです。",
+            "交番行きます。",
+            "無理ゲー(；´д⊂)",
+        ])
+
+    return random.choice([
+        "難しいです。",
+        "それは違います。",
+        "お願いします…。",
+        "ちょっと分からないです。",
+        "そういうことではないです。",
+    ])
+
+
+def avoid_echo(user_text: str, reply_text: str, context_text: str) -> str:
+    cleaned = remove_echo_lines(user_text, reply_text)
+
+    if cleaned and not is_echo_reply(user_text, cleaned):
+        return cleaned
+
+    return anti_echo_fallback(user_text, context_text)
+
+
 def shorten_arakun(text: str) -> str:
     if not text:
         return "難しいです。"
@@ -473,6 +616,12 @@ def ask_arakun(user_text: str, context_text: str) -> str:
 一致単語と関係ない過去例は無視する。
 過去例を無理やり使わない。
 ただし一致単語がある場合は、その単語に関係するエピソードや返答ペアを優先する。
+
+おうむ返しは禁止。
+ユーザー発言をそのまま繰り返さない。
+ユーザーの語尾だけ変えて返さない。
+「◯◯？」「◯◯です」みたいに、入力文をほぼコピーした返答は禁止。
+同じ単語を使う場合でも、過去ログ由来の別フレーズ・エピソード断片に変換して返す。
 
 「あはい…」に頼りすぎない。
 口癖だけで返さない。
@@ -533,6 +682,7 @@ LINEの一言として返す。
 3. 返答ペアがある場合は最優先で真似る。
 4. エピソードや橋本新文脈がある場合は断片を自然に混ぜる。
 5. 解説ではなくLINEの一言として返す。
+6. ユーザー発言をそのまま繰り返さない。質問文をコピーして返さない。
 """
 
     try:
@@ -547,7 +697,7 @@ LINEの一言として返す。
         )
 
         text = response.choices[0].message.content
-        return shorten_arakun(text)
+        return avoid_echo(user_text, shorten_arakun(text), context_text)
 
     except Exception as e:
         print("Groq error:", e)
