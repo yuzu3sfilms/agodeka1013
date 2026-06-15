@@ -2,13 +2,11 @@ import os
 import hmac
 import hashlib
 import base64
-import time
 import random
 import unicodedata
 import requests
-from difflib import SequenceMatcher
 from collections import deque
-from functools import lru_cache
+from difflib import SequenceMatcher
 from flask import Flask, request, abort
 from openai import OpenAI
 
@@ -20,28 +18,31 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 
 client = OpenAI(
     api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
+    base_url="https://api.groq.com/openai/v1",
 )
 
 PROMPT_FILE = "AGODEKA1013_PROMPT.txt"
 TRIGGER_FILE = "arakun_triggers_exhaustive.txt"
 EPISODE_FILE = "arakun_episodes_exhaustive.txt"
-STYLE_EXAMPLE_FILE = "arakun_style_examples_exhaustive.txt"
+STYLE_FILE = "arakun_style_examples_exhaustive.txt"
 REPLY_PAIR_FILE = "arakun_reply_pairs_exhaustive.txt"
 HASHIMOTO_SHIN_FILE = "hashimoto_shin_examples.txt"
 
-# ===== 返信頻度調整 =====
-# うるさければ下げる。黙りすぎなら上げる。
-RANDOM_JOIN_PROBABILITY = 1.00          # 通常の語録/Excel単語ヒット時の乱入率
-STRONG_JOIN_PROBABILITY = 1.00          # 強い語録ヒット時の乱入率
-EPISODE_JOIN_PROBABILITY = 1.00         # エピソード一致時の乱入率
-ACTIVE_STRONG_CONTEXT_PROBABILITY = 1.00
-ACTIVE_WEAK_CONTEXT_PROBABILITY = 1.00
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+MAX_REPLY_CHARS = 190
 
-ACTIVE_MIN_SECONDS = 120
-ACTIVE_MAX_SECONDS = 360
+MAX_TRIGGERS = 12000
+MAX_EPISODES = 9000
+MAX_REPLY_PAIRS = 5000
+MAX_STYLE = 1400
+MAX_HASHIMOTO_SHIN = 700
 
-ACTIVE_CHATS = {}
+SCAN_EPISODES = 2800
+SCAN_REPLY_PAIRS = 2200
+SCAN_STYLE = 1000
+SCAN_HASHIMOTO_SHIN = 800
+
+HISTORY_LEN = 5
 CHAT_HISTORY = {}
 
 CALL_WORDS = [
@@ -52,13 +53,6 @@ CALL_WORDS = [
 STOP_WORDS = [
     "もういい", "黙って", "だまって", "終わり", "終了", "関係ない",
     "別の話", "あらくん停止", "あらくん終了", "橋本終了", "橋本新終了", "顎終了",
-]
-
-# 呼ばれていない時は、実務系に割り込まないための保険。
-# ただし呼びかけられた場合は返す。
-UNRELATED_WORDS = [
-    "天気", "ニュース", "研究", "論文",
-    "rで", "anova", "統計", "学会", "メール",
 ]
 
 DEFAULT_TRIGGERS = [
@@ -74,20 +68,20 @@ DEFAULT_TRIGGERS = [
     "バーミヤン", "ムタァ", "ムタファ", "ポッツォ", "ポツォ",
 ]
 
-STRONG_WORDS = [
-    "橋本新", "きゃぴ", "牛角", "二郎", "エスターク", "フリーポーズ",
-    "ブックオフ", "美味しいよ", "ｷﾞｬｵｫ", "ギャオ", "ムタァ", "ポッツォ",
-    "顎動画", "かわいいでしょ",
-]
-
-# これらだけでは起動しない。過去ログ由来でも一般語すぎるため。
-GENERIC_TRIGGER_BLACKLIST = {
+GENERIC_WORDS = {
     "今日", "明日", "昨日", "予定", "仕事", "大丈夫", "了解", "はい",
     "いい", "そう", "これ", "それ", "どれ", "ここ", "そこ", "あれ",
     "です", "ます", "した", "する", "ある", "ない", "こと", "もの",
-    "www", "wwww", "(emoji)", "(thinking)", "line", "twitter", "instagram",
-    "笑", "草", "w", "ok", "ng", "やばい", "まじ", "えぐい",
+    "www", "wwww", "笑", "草", "w", "ok", "ng", "やばい", "まじ",
+    "えぐい", "line", "twitter", "instagram", "(emoji)", "(thinking)",
 }
+
+AI_PHRASES = [
+    "こんにちは！", "こんにちは。", "お話しできて嬉しい", "何かお手伝い",
+    "もちろんです", "わかりました", "ご質問ありがとうございます",
+    "お気軽に聞いてください", "何でも聞いてください", "AIとして",
+    "私は", "以下の", "ポイントは", "要するに", "まとめると",
+]
 
 
 def normalize_text(text) -> str:
@@ -101,91 +95,85 @@ def normalize_text(text) -> str:
 
 def load_lines(filename: str, max_lines: int | None = None) -> list[str]:
     try:
-        lines = []
+        result = []
         with open(filename, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.lstrip().startswith("#"):
                     continue
-                lines.append(line)
-                if max_lines and len(lines) >= max_lines:
+                result.append(line)
+                if max_lines and len(result) >= max_lines:
                     break
-        return lines
+        return result
     except FileNotFoundError:
         return []
 
 
+def unique(items: list[str]) -> list[str]:
+    seen = set()
+    out = []
+    for item in items:
+        item = item.strip()
+        if item and item not in seen:
+            out.append(item)
+            seen.add(item)
+    return out
+
+
 SYSTEM_PROMPT = "\n".join(load_lines(PROMPT_FILE))
 
-# 無料Renderで落ちにくい範囲で、前回より参照量を増やす。
-TRIGGER_WORDS = load_lines(TRIGGER_FILE, max_lines=12000)
-EPISODES = load_lines(EPISODE_FILE, max_lines=9000)
-STYLE_EXAMPLES = load_lines(STYLE_EXAMPLE_FILE, max_lines=1400)
-REPLY_PAIRS = load_lines(REPLY_PAIR_FILE, max_lines=5000)
-HASHIMOTO_SHIN_EXAMPLES = load_lines(HASHIMOTO_SHIN_FILE, max_lines=700)
+RAW_TRIGGERS = load_lines(TRIGGER_FILE, MAX_TRIGGERS)
+RAW_EPISODES = load_lines(EPISODE_FILE, MAX_EPISODES)
+RAW_REPLY_PAIRS = load_lines(REPLY_PAIR_FILE, MAX_REPLY_PAIRS)
+RAW_STYLE = load_lines(STYLE_FILE, MAX_STYLE)
+RAW_HASHIMOTO_SHIN = load_lines(HASHIMOTO_SHIN_FILE, MAX_HASHIMOTO_SHIN)
 
-TRIGGER_WORDS = sorted(set(TRIGGER_WORDS + DEFAULT_TRIGGERS))
-
-NORMALIZED_CALL_WORDS = [normalize_text(w) for w in CALL_WORDS]
 NORMALIZED_STOP_WORDS = [normalize_text(w) for w in STOP_WORDS]
-NORMALIZED_UNRELATED_WORDS = [normalize_text(w) for w in UNRELATED_WORDS]
-NORMALIZED_STRONG_WORDS = [normalize_text(w) for w in STRONG_WORDS]
+NORMALIZED_CALL_WORDS = [normalize_text(w) for w in CALL_WORDS]
+NORMALIZED_GENERIC = {normalize_text(w) for w in GENERIC_WORDS}
 
-# トリガーを正規化して保持。1通ごとに全件を見るのはOK。
-# 重かった原因は「候補行ごとに全トリガーを回す」ことなので、それはしない。
-NORMALIZED_TRIGGER_PAIRS = []
-for w in TRIGGER_WORDS:
-    nw = normalize_text(w)
-    if not nw:
+ALL_TRIGGERS = sorted(set(RAW_TRIGGERS + DEFAULT_TRIGGERS), key=len, reverse=True)
+TRIGGER_PAIRS = []
+for word in ALL_TRIGGERS:
+    nw = normalize_text(word)
+    if not nw or nw in NORMALIZED_GENERIC:
         continue
-    if nw in {normalize_text(x) for x in GENERIC_TRIGGER_BLACKLIST}:
-        continue
-    if len(nw) < 2 or len(nw) > 40:
-        continue
-    NORMALIZED_TRIGGER_PAIRS.append((nw, w))
+    if 2 <= len(nw) <= 40:
+        TRIGGER_PAIRS.append((nw, word))
+TRIGGER_PAIRS = sorted(set(TRIGGER_PAIRS), key=lambda x: len(x[0]), reverse=True)
 
-# 長い語を優先して拾う。短い語の誤爆を少し減らす。
-NORMALIZED_TRIGGER_PAIRS = sorted(
-    set(NORMALIZED_TRIGGER_PAIRS),
-    key=lambda x: len(x[0]),
-    reverse=True
-)
-
-# 事前正規化。毎回巨大ファイルをnormalizeしない。
-REPLY_PAIR_ENTRIES = [(normalize_text(line), line) for line in REPLY_PAIRS]
-STYLE_ENTRIES = [(normalize_text(line), line) for line in STYLE_EXAMPLES]
+REPLY_ENTRIES = [(normalize_text(line), line) for line in RAW_REPLY_PAIRS]
+STYLE_ENTRIES = [(normalize_text(line), line) for line in RAW_STYLE]
 
 EPISODE_ENTRIES = []
-for line in EPISODES:
+for line in RAW_EPISODES:
     if "::" in line:
         keywords, episode = line.split("::", 1)
-        keyword_list = [normalize_text(k.strip()) for k in keywords.split(",") if k.strip()]
-        EPISODE_ENTRIES.append((keyword_list, normalize_text(episode), episode.strip()))
+        keys = [normalize_text(k.strip()) for k in keywords.split(",") if k.strip()]
+        EPISODE_ENTRIES.append((keys, normalize_text(episode), episode.strip()))
     else:
         EPISODE_ENTRIES.append(([normalize_text(line)], normalize_text(line), line.strip()))
 
-HASHIMOTO_SHIN_ENTRIES = []
-for line in HASHIMOTO_SHIN_EXAMPLES:
-    HASHIMOTO_SHIN_ENTRIES.append((normalize_text(line), line))
-for line in REPLY_PAIRS:
+HASHIMOTO_SHIN_ENTRIES = [(normalize_text(line), line) for line in RAW_HASHIMOTO_SHIN]
+for line in RAW_REPLY_PAIRS:
     if "橋本新" in line:
         HASHIMOTO_SHIN_ENTRIES.append((normalize_text(line), line))
-for line in EPISODES:
+for line in RAW_EPISODES:
     if "橋本新" in line:
         HASHIMOTO_SHIN_ENTRIES.append((normalize_text(line), line))
-for line in STYLE_EXAMPLES:
+for line in RAW_STYLE:
     if "橋本新" in line:
         HASHIMOTO_SHIN_ENTRIES.append((normalize_text(line), line))
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
-    hash_digest = hmac.new(
+    digest = hmac.new(
         LINE_CHANNEL_SECRET.encode("utf-8"),
         body,
-        hashlib.sha256
+        hashlib.sha256,
     ).digest()
-    expected_signature = base64.b64encode(hash_digest).decode("utf-8")
-    return hmac.compare_digest(expected_signature, signature)
+    expected = base64.b64encode(digest).decode("utf-8")
+    return hmac.compare_digest(expected, signature)
 
 
 def get_chat_key(event: dict) -> str | None:
@@ -194,364 +182,195 @@ def get_chat_key(event: dict) -> str | None:
 
 
 def get_history(chat_key: str) -> list[str]:
-    return list(CHAT_HISTORY.get(chat_key, deque(maxlen=5)))
+    return list(CHAT_HISTORY.get(chat_key, deque(maxlen=HISTORY_LEN)))
 
 
 def add_history(chat_key: str, text: str):
     if chat_key not in CHAT_HISTORY:
-        CHAT_HISTORY[chat_key] = deque(maxlen=5)
+        CHAT_HISTORY[chat_key] = deque(maxlen=HISTORY_LEN)
     CHAT_HISTORY[chat_key].append(text)
 
 
-def recent_context_text(chat_key: str, user_text: str) -> str:
-    history = get_history(chat_key)
-    return "\n".join(history + [user_text])
+def build_context(chat_key: str, user_text: str) -> str:
+    return "\n".join(get_history(chat_key) + [user_text])
 
 
-def is_called(user_text: str) -> bool:
-    normalized = normalize_text(user_text)
-    return any(word in normalized for word in NORMALIZED_CALL_WORDS)
+def should_stop(text: str) -> bool:
+    nt = normalize_text(text)
+    return any(w in nt for w in NORMALIZED_STOP_WORDS)
 
 
-def should_stop(user_text: str) -> bool:
-    normalized = normalize_text(user_text)
-    return any(word in normalized for word in NORMALIZED_STOP_WORDS)
-
-
-def looks_unrelated(user_text: str) -> bool:
-    normalized = normalize_text(user_text)
-    return any(word in normalized for word in NORMALIZED_UNRELATED_WORDS)
-
-
-def mark_active(chat_key: str):
-    ACTIVE_CHATS[chat_key] = {
-        "time": time.time(),
-        "ttl": random.randint(ACTIVE_MIN_SECONDS, ACTIVE_MAX_SECONDS),
-    }
-
-
-def is_active_chat(chat_key: str) -> bool:
-    state = ACTIVE_CHATS.get(chat_key)
-    if not state:
-        return False
-    return time.time() - state["time"] < state["ttl"]
-
-
-def expire_chat(chat_key: str):
-    ACTIVE_CHATS.pop(chat_key, None)
-
-
-@lru_cache(maxsize=2048)
-def make_chunks(normalized_text: str) -> tuple[str, ...]:
-    chunks = set()
-    text = normalized_text[:90]
-    for n in (2, 3, 4):
-        for i in range(max(0, len(text) - n + 1)):
-            chunks.add(text[i:i+n])
-    return tuple(chunks)
-
-
-def get_trigger_hits(text: str, include_call_words: bool = False, limit: int = 20) -> list[tuple[str, str]]:
-    normalized = normalize_text(text)
+def get_trigger_hits(context_text: str, limit: int = 20) -> list[tuple[str, str]]:
+    nt = normalize_text(context_text)
     hits = []
-
-    call_norms = set(NORMALIZED_CALL_WORDS)
-
-    for nw, original in NORMALIZED_TRIGGER_PAIRS:
-        if not include_call_words and nw in call_norms:
-            continue
-
-        if nw in normalized:
+    for nw, original in TRIGGER_PAIRS:
+        if nw in nt:
             hits.append((nw, original))
-
         if len(hits) >= limit:
             break
-
     return hits
 
 
-def score_entry_by_hits(normalized_text: str, normalized_line: str, hits: list[tuple[str, str]]) -> int:
+def score_line(context_text: str, normalized_line: str, hits: list[tuple[str, str]]) -> int:
+    nt = normalize_text(context_text)
     score = 0
 
     for nw, _original in hits:
-        if nw and nw in normalized_line:
-            score += 80 + min(len(nw), 20)
+        if nw in normalized_line:
+            score += 100 + min(len(nw), 20)
 
-    # 実際の入力との文字チャンク一致。補助点に留める。
-    for chunk in make_chunks(normalized_text):
-        if chunk and chunk in normalized_line:
-            score += len(chunk)
+    base = nt[:90]
+    chunks = set()
+    for n in (2, 3, 4):
+        for i in range(max(0, len(base) - n + 1)):
+            chunks.add(base[i:i+n])
+
+    for c in chunks:
+        if c and c in normalized_line:
+            score += len(c)
 
     return score
 
 
-def top_entries_by_hits(text: str, entries: list[tuple[str, str]], hits: list[tuple[str, str]], limit: int = 5, min_score: int = 40, scan_limit: int = 2000) -> list[str]:
-    if not hits:
+def top_entries(context_text: str, entries: list[tuple[str, str]], hits: list[tuple[str, str]], limit: int, scan_limit: int, min_score: int = 45) -> list[str]:
+    if not entries:
         return []
 
-    normalized_text = normalize_text(text)
+    if not hits:
+        sample = entries[:min(len(entries), scan_limit)]
+        return [line for _nt, line in random.sample(sample, min(limit, len(sample)))]
+
     scored = []
-
     for normalized_line, line in entries[:scan_limit]:
-        # まず一致語を含む行だけに絞る。これで噛み合わない例を減らす。
-        if not any(nw in normalized_line for nw, _ in hits):
+        if not any(nw in normalized_line for nw, _o in hits):
             continue
-
-        score = score_entry_by_hits(normalized_text, normalized_line, hits)
+        score = score_line(context_text, normalized_line, hits)
         if score >= min_score:
             scored.append((score, line))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [line for _, line in scored[:limit]]
+    return [line for _score, line in scored[:limit]]
 
 
-def find_episode_context(context_text: str, hits: list[tuple[str, str]]) -> str:
-    normalized_context = normalize_text(context_text)
+def find_episodes(context_text: str, hits: list[tuple[str, str]]) -> str:
+    nt = normalize_text(context_text)
     scored = []
 
-    for keyword_list, normalized_episode, episode in EPISODE_ENTRIES[:2500]:
+    for keys, normalized_episode, episode in EPISODE_ENTRIES[:SCAN_EPISODES]:
         score = 0
 
-        for nk in keyword_list[:10]:
-            if nk and nk in normalized_context:
-                score += 100 + min(len(nk), 20)
+        for key in keys[:10]:
+            if key and key not in NORMALIZED_GENERIC and key in nt:
+                score += 120 + min(len(key), 20)
 
-        for nw, _original in hits:
+        for nw, _o in hits:
             if nw in normalized_episode:
-                score += 70 + min(len(nw), 20)
+                score += 80 + min(len(nw), 20)
 
         if score > 0:
             scored.append((score, episode))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-
-    seen = set()
-    unique = []
-    for _score, episode in scored:
-        e = episode.strip()
-        if e and e not in seen:
-            unique.append(e)
-            seen.add(e)
-        if len(unique) >= 5:
-            break
-
-    return "\n".join(unique)
+    return "\n".join(unique([episode for _score, episode in scored[:5]]))
 
 
-def find_reply_examples(context_text: str, hits: list[tuple[str, str]]) -> str:
-    # 一致語を含む返答ペアだけ渡す。これで会話の噛み合わなさをかなり減らす。
-    matches = top_entries_by_hits(
-        context_text,
-        REPLY_PAIR_ENTRIES,
-        hits,
-        limit=5,
-        min_score=45,
-        scan_limit=2200
-    )
-    return "\n".join(matches)
+def find_reply_pairs(context_text: str, hits: list[tuple[str, str]]) -> str:
+    if not hits:
+        return ""
+    return "\n".join(top_entries(context_text, REPLY_ENTRIES, hits, 5, SCAN_REPLY_PAIRS, 50))
 
 
 def find_style_examples(context_text: str, hits: list[tuple[str, str]]) -> str:
-    matches = top_entries_by_hits(
-        context_text,
-        STYLE_ENTRIES,
-        hits,
-        limit=4,
-        min_score=45,
-        scan_limit=1000
-    )
-
-    # 全返信モードでは、過去ログ単語がない普通の発言にも返す。
-    # その時にChatGPTっぽくならないよう、汎用の口調例を渡す。
-    if not matches:
-        if len(STYLE_EXAMPLES) <= 4:
-            matches = STYLE_EXAMPLES
-        else:
-            matches = random.sample(STYLE_EXAMPLES, 4)
-
-    return "\n".join(matches)
+    examples = top_entries(context_text, STYLE_ENTRIES, hits, 4, SCAN_STYLE, 45)
+    if not examples and RAW_STYLE:
+        examples = random.sample(RAW_STYLE, min(4, len(RAW_STYLE)))
+    return "\n".join(examples[:4])
 
 
-def find_hashimoto_shin_context(context_text: str, hits: list[tuple[str, str]]) -> str:
+def find_hashimoto_shin(context_text: str, hits: list[tuple[str, str]]) -> str:
     if not HASHIMOTO_SHIN_ENTRIES:
         return ""
 
-    normalized_context = normalize_text(context_text)
+    local_hits = list(hits)
+    if "橋本新" in context_text:
+        local_hits.append((normalize_text("橋本新"), "橋本新"))
 
-    # 橋本新が出ている時は橋本新行を積極採用
-    if "橋本新" in context_text or normalize_text("橋本新") in normalized_context:
-        local_hits = hits + [(normalize_text("橋本新"), "橋本新")]
-    else:
-        local_hits = hits
+    if not local_hits:
+        return ""
 
-    matches = top_entries_by_hits(
-        context_text,
-        HASHIMOTO_SHIN_ENTRIES,
-        local_hits,
-        limit=4,
-        min_score=35,
-        scan_limit=700
-    )
-    return "\n".join(matches)
+    return "\n".join(top_entries(context_text, HASHIMOTO_SHIN_ENTRIES, local_hits, 4, SCAN_HASHIMOTO_SHIN, 35))
 
 
-def has_episode_hit(context_text: str, hits: list[tuple[str, str]]) -> bool:
-    return bool(find_episode_context(context_text, hits))
+def simplify_for_echo(text: str) -> str:
+    nt = normalize_text(text)
+    for w in NORMALIZED_CALL_WORDS:
+        nt = nt.replace(w, "")
+    for ch in "!?！？。、,.…・「」『』（）()[]【】\n\r\t":
+        nt = nt.replace(ch, "")
+    return nt
 
 
-def has_context_hit(context_text: str) -> tuple[bool, list[tuple[str, str]], bool]:
-    hits = get_trigger_hits(context_text, include_call_words=False, limit=12)
+def is_echo(user_text: str, reply_text: str) -> bool:
+    user_core = simplify_for_echo(user_text)
+    reply_core = simplify_for_echo(reply_text)
 
-    if hits:
-        episode_hit = has_episode_hit(context_text, hits)
-        return True, hits, episode_hit
-
-    return False, [], False
-
-
-def should_randomly_join(user_text: str, context_text: str) -> bool:
-    # 先に過去ログ/Excel由来ワードを見る。
-    # ヒットしているなら実務系っぽい単語が混じっても返す。
-    has_hit, hits, episode_hit = has_context_hit(context_text)
-    if not has_hit:
+    if not user_core or not reply_core:
         return False
 
-    normalized_context = normalize_text(context_text)
-    strong_hit = any(word in normalized_context for word in NORMALIZED_STRONG_WORDS)
-
-    if strong_hit:
-        return random.random() < STRONG_JOIN_PROBABILITY
-
-    if episode_hit:
-        return random.random() < EPISODE_JOIN_PROBABILITY
-
-    return random.random() < RANDOM_JOIN_PROBABILITY
-
-
-def should_continue_active_chat(user_text: str, context_text: str) -> bool:
-    has_hit, _hits, episode_hit = has_context_hit(context_text)
-
-    if has_hit or episode_hit:
-        return random.random() < ACTIVE_STRONG_CONTEXT_PROBABILITY
-
-    if looks_unrelated(user_text):
-        return False
-
-    # 会話中は「それな」「何で？」みたいな短文にもかなり返す
-    return random.random() < ACTIVE_WEAK_CONTEXT_PROBABILITY
-
-
-
-
-def strip_call_words_for_echo(text: str) -> str:
-    normalized = normalize_text(text)
-    for word in NORMALIZED_CALL_WORDS:
-        normalized = normalized.replace(word, "")
-    return normalized
-
-
-def is_echo_reply(user_text: str, reply_text: str) -> bool:
-    """
-    ユーザー発言の単純なおうむ返しを厳しめに検出する。
-    完全一致、丸ごと含有、短文コピー、類似度過剰を弾く。
-    """
-    user_core = strip_call_words_for_echo(user_text)
-    reply_norm = normalize_text(reply_text)
-
-    if not user_core or not reply_norm:
-        return False
-
-    delete_chars = "!?！？。、,.…・「」『』（）()[]【】"
-    for ch in delete_chars:
-        user_core = user_core.replace(ch, "")
-        reply_norm = reply_norm.replace(ch, "")
-
-    if not user_core or not reply_norm:
-        return False
-
-    if len(user_core) <= 5:
-        if user_core == reply_norm:
-            return True
-        if user_core in reply_norm and len(reply_norm) <= len(user_core) + 6:
-            return True
-
-    if user_core == reply_norm:
+    if user_core == reply_core:
         return True
 
-    if len(user_core) >= 4 and user_core in reply_norm:
+    if len(user_core) <= 5 and user_core in reply_core and len(reply_core) <= len(user_core) + 6:
         return True
 
-    if len(reply_norm) >= 4 and reply_norm in user_core:
+    if len(user_core) >= 4 and user_core in reply_core:
         return True
 
-    ratio = SequenceMatcher(None, user_core, reply_norm).ratio()
-    if ratio >= 0.60 and len(reply_norm) <= int(len(user_core) * 1.8) + 8:
+    if len(reply_core) >= 4 and reply_core in user_core:
+        return True
+
+    ratio = SequenceMatcher(None, user_core, reply_core).ratio()
+    if ratio >= 0.60 and len(reply_core) <= int(len(user_core) * 1.8) + 8:
         return True
 
     chunks = set()
     for i in range(max(0, len(user_core) - 2)):
-        chunk = user_core[i:i+3]
-        if chunk:
-            chunks.add(chunk)
+        chunks.add(user_core[i:i+3])
 
-    if not chunks:
-        return False
+    if chunks:
+        overlap = sum(1 for c in chunks if c in reply_core)
+        if overlap / len(chunks) >= 0.55 and len(reply_core) <= len(user_core) + 30:
+            return True
 
-    overlap = sum(1 for c in chunks if c in reply_norm)
-    overlap_ratio = overlap / max(1, len(chunks))
-
-    return overlap_ratio >= 0.55 and len(reply_norm) <= len(user_core) + 30
-
-def remove_echo_lines(user_text: str, reply_text: str) -> str:
-    user_core = strip_call_words_for_echo(user_text)
-    kept = []
-
-    for line in reply_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        line_norm = normalize_text(line)
-
-        if user_core and len(user_core) >= 4:
-            if line_norm == user_core:
-                continue
-            if user_core in line_norm and len(line_norm) <= len(user_core) + 12:
-                continue
-
-        kept.append(line)
-
-    return "\n".join(kept).strip()
+    return False
 
 
-def anti_echo_fallback(user_text: str, context_text: str) -> str:
-    """
-    おうむ返しになった時の逃げ。
-    できるだけユーザー発言と同じ語を使わず、過去ログっぽい別フレーズに逃がす。
-    """
-    normalized_context = normalize_text(context_text)
+def clean_reply(text: str) -> str:
+    text = (text or "").strip()
+    for phrase in AI_PHRASES:
+        text = text.replace(phrase, "")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    text = "\n".join(lines[:3])
+    return text[:MAX_REPLY_CHARS] if text else "難しいです。"
 
+
+def fallback_reply(user_text: str, context_text: str) -> str:
+    nt = normalize_text(context_text)
     candidates = []
 
-    if normalize_text("橋本新") in normalized_context:
+    if normalize_text("橋本新") in nt:
         candidates += ["ｷﾞｬｵｫ。", "名言集です。", "それは新の方です。"]
-
-    if normalize_text("きゃぴ") in normalized_context:
+    if normalize_text("きゃぴ") in nt:
         candidates += ["ぼくぅの表情です。", "それは良いです！！", "泣きます。"]
-
-    if normalize_text("二郎") in normalized_context or normalize_text("野猿") in normalized_context:
+    if normalize_text("二郎") in nt or normalize_text("野猿") in nt:
         candidates += ["ブックオフのはずが違う所に着きました。", "そこは難しいです。", "もう着いてます。"]
-
-    if normalize_text("牛角") in normalized_context:
+    if normalize_text("牛角") in nt:
         candidates += ["多すぎます。", "探すのてこずりましたすみませんでした。", "地図はからっきしだめです。"]
-
-    if normalize_text("エスターク") in normalized_context:
+    if normalize_text("エスターク") in nt:
         candidates += ["通常種ではないです。", "色が違います。", "それは良いです！！"]
-
-    if normalize_text("フリーポーズ") in normalized_context:
+    if normalize_text("フリーポーズ") in nt:
         candidates += ["表情が難しいです。", "かわいいでしょ(ﾉ≧▽≦)ﾉ", "お願いします。"]
-
-    if normalize_text("地図") in normalized_context or normalize_text("迷子") in normalized_context:
+    if normalize_text("地図") in nt or normalize_text("迷子") in nt:
         candidates += ["交番行きます。", "無理ゲー(；´д⊂)", "からっきしだめです。"]
 
     candidates += [
@@ -566,178 +385,138 @@ def anti_echo_fallback(user_text: str, context_text: str) -> str:
 
     random.shuffle(candidates)
     for c in candidates:
-        if not is_echo_reply(user_text, c):
+        if not is_echo(user_text, c):
             return c
 
     return "難しいです。"
 
-def avoid_echo(user_text: str, reply_text: str, context_text: str) -> str:
-    cleaned = remove_echo_lines(user_text, reply_text)
 
-    if cleaned and not is_echo_reply(user_text, cleaned):
-        return cleaned
-
-    fallback = anti_echo_fallback(user_text, context_text)
-    if not is_echo_reply(user_text, fallback):
-        return fallback
-
-    return "難しいです。"
-
-def shorten_arakun(text: str) -> str:
-    if not text:
-        return "難しいです。"
-
-    text = text.strip()
-
-    banned_phrases = [
-        "こんにちは！", "こんにちは。", "お話しできて嬉しい", "何かお手伝い",
-        "もちろんです", "わかりました", "ご質問ありがとうございます",
-        "お気軽に聞いてください", "何でも聞いてください", "AIとして",
-        "私は", "以下の", "ポイントは", "要するに", "まとめると",
-    ]
-
-    for phrase in banned_phrases:
-        text = text.replace(phrase, "")
-
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    text = "\n".join(lines[:3])
-    return text[:190] if text else "難しいです。"
+def final_reply(user_text: str, raw_text: str, context_text: str) -> str:
+    reply = clean_reply(raw_text)
+    if not is_echo(user_text, reply):
+        return reply
+    return fallback_reply(user_text, context_text)
 
 
-def ask_arakun(user_text: str, context_text: str) -> str:
-    hits = get_trigger_hits(context_text, include_call_words=True, limit=12)
-    matched_words = "、".join(original for _nw, original in hits) if hits else "なし"
+def build_prompt(user_text: str, context_text: str) -> tuple[str, str]:
+    hits = get_trigger_hits(context_text, limit=20)
+    matched = "、".join([original for _nw, original in hits]) if hits else "なし"
 
-    episode_context = find_episode_context(context_text, hits)
-    reply_examples = find_reply_examples(context_text, hits)
-    style_examples = find_style_examples(context_text, hits)
-    hashimoto_shin_context = find_hashimoto_shin_context(context_text, hits)
+    episodes = find_episodes(context_text, hits)
+    reply_pairs = find_reply_pairs(context_text, hits)
+    style = find_style_examples(context_text, hits)
+    hashimoto_shin = find_hashimoto_shin(context_text, hits)
 
-    arakun_prompt = SYSTEM_PROMPT + """
+    system_prompt = SYSTEM_PROMPT + """
 
-# Runtime rules
+# Runtime rules v8 clean
 
 あなたは親切なAIではなく、LINEログ由来の「あらくん」です。
+このBotは全返信モードです。テキストが来たら必ず短く返します。
 
 最重要:
-このBotは全返信モード。テキストが来たら短く返す。
-いまのユーザー発言・直近文脈に出ている一致単語だけを手がかりにする。
-一致単語と関係ない過去例は無視する。
-過去例を無理やり使わない。
-ただし一致単語がある場合は、その単語に関係するエピソードや返答ペアを優先する。
-一致単語がない場合も無視せず、短い相づち・ズレた一言・質問返しで返す。
+- おうむ返しは禁止。
+- ユーザー発言をそのまま繰り返さない。
+- ユーザーの語尾だけ変えて返さない。
+- ユーザーの文を主語にして「〜です」「〜ですね」と返さない。
+- 一致ワードは検索用の手がかりであり、そのまま返答文へコピーしない。
 
-おうむ返しは禁止。これは最優先。
-ユーザー発言をそのまま繰り返さない。
-ユーザーの語尾だけ変えて返さない。
-ユーザーの文を主語にして「〜です」「〜ですね」と返さない。
-「◯◯？」「◯◯です」みたいに、入力文をほぼコピーした返答は禁止。
-同じ単語を使う場合でも、過去ログ由来の別フレーズ・エピソード断片に変換して返す。
-一致ワードは検索用の手がかりであって、そのまま返答文にコピーしない。
+返答方針:
+- 一致ワードがある場合、そのワードに関係する過去例だけ使う。
+- 一致ワードと関係ない過去例は無視する。
+- 返答ペアがある場合は、その返し方を最優先で真似る。
+- エピソードや橋本新文脈がある場合は、断片を自然に混ぜる。
+- 一致ワードがない場合も無視せず、短い相づち・ズレた一言・質問返しで返す。
+- 説明ではなくLINEの一言として返す。
 
-「あはい…」に頼りすぎない。
-口癖だけで返さない。
-過去ログにある返答パターンを優先する。
+キャラ:
+- 「あはい…」に頼りすぎない。
+- 口癖だけで返さない。
+- 変なところだけ妙に具体的なことがある。
+- 急にテンションが上がることがある。
+- でも、まったく関係ない話に飛びすぎない。
+- 真面目に解説しすぎない。
+- 質問に全部答えようとしない。
+- 有益なアドバイスを無理に出さない。
+- ChatGPTっぽい挨拶は禁止。
+- 箇条書きは禁止。
 
-変なところだけ妙に具体的なことがある。
-急にテンションが上がることがある。
-でも、まったく関係ない話に飛びすぎない。
-
-真面目に解説しすぎない。
-質問に全部答えようとしない。
-有益なアドバイスを無理に出さない。
-ChatGPTっぽい挨拶は禁止。
-箇条書きは禁止。
-
-返答は1〜3文。
-190文字以内。
-LINEの一言として返す。
-
-テンションが上がる話題では使ってよい:
-「！！」
-「😭」
-「きゃぴい」
-「ぼくぅの」
-「ｷﾞｬｵｫ。」
-
-地図、待ち合わせ、場所の話題では少し混乱してよい。
-同じ単語を少し繰り返してよい。
+形式:
+- 返答は1〜3文。
+- 190文字以内。
+- テンションが上がる話題では「！！」「😭」「きゃぴい」「ぼくぅの」「ｷﾞｬｵｫ。」などを使ってよい。
+- 地図、待ち合わせ、場所の話題では少し混乱してよい。
 """
 
-    recent_lines = "\n".join(context_text.splitlines()[-5:])
+    recent = "\n".join(context_text.splitlines()[-HISTORY_LEN:])
 
-    user_content = f"""
+    user_prompt = f"""
 直近の会話:
-{recent_lines}
+{recent}
 
 今回のユーザー発言:
 {user_text}
 
 一致した過去ログ/Excel由来ワード:
-{matched_words}
+{matched}
 
 関連エピソード:
-{episode_context if episode_context else "なし"}
+{episodes if episodes else "なし"}
 
 過去の似た返答ペア:
-{reply_examples if reply_examples else "なし"}
+{reply_pairs if reply_pairs else "なし"}
 
 橋本新として参照できる過去文脈:
-{hashimoto_shin_context if hashimoto_shin_context else "なし"}
+{hashimoto_shin if hashimoto_shin else "なし"}
 
 参考にする口調例:
-{style_examples if style_examples else "なし"}
+{style if style else "なし"}
 
-返答方針:
-1. 直接呼ばれていたら必ず短く返す。
-2. 一致ワードがある場合は、そのワードに関係する過去例だけ使う。
-3. 返答ペアがある場合は最優先で真似る。
-4. エピソードや橋本新文脈がある場合は断片を自然に混ぜる。
-5. 解説ではなくLINEの一言として返す。
-6. ユーザー発言をそのまま繰り返さない。質問文をコピーして返さない。
+出力:
+ユーザー発言をコピーせず、LINEの一言として短く返す。
 """
+
+    return system_prompt, user_prompt
+
+
+def ask_arakun(user_text: str, context_text: str) -> str:
+    system_prompt, user_prompt = build_prompt(user_text, context_text)
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
             messages=[
-                {"role": "system", "content": arakun_prompt},
-                {"role": "user", "content": user_content}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ],
-            temperature=1.05,
-            max_tokens=130
+            temperature=1.02,
+            max_tokens=130,
         )
-
-        text = response.choices[0].message.content
-        return avoid_echo(user_text, shorten_arakun(text), context_text)
-
+        raw = response.choices[0].message.content or ""
+        return final_reply(user_text, raw, context_text)
     except Exception as e:
         print("Groq error:", e)
-        return "難しいです…。"
+        return fallback_reply(user_text, context_text)
 
 
 def reply_to_line(reply_token: str, text: str):
     url = "https://api.line.me/v2/bot/message/reply"
-
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
     }
-
     data = {
         "replyToken": reply_token,
-        "messages": [{"type": "text", "text": text}]
+        "messages": [{"type": "text", "text": text}],
     }
-
-    response = requests.post(url, headers=headers, json=data, timeout=10)
-
-    if response.status_code >= 300:
-        print("LINE reply error:", response.status_code, response.text)
+    res = requests.post(url, headers=headers, json=data, timeout=10)
+    if res.status_code >= 300:
+        print("LINE reply error:", res.status_code, res.text)
 
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Arakun Bot is running."
+    return "AI Arakun Bot v8 clean is running."
 
 
 @app.route("/callback", methods=["POST"])
@@ -760,30 +539,21 @@ def callback():
 
         user_text = message.get("text", "")
         reply_token = event.get("replyToken")
-
-        if not reply_token:
-            continue
-
         chat_key = get_chat_key(event)
-        if not chat_key:
+
+        if not reply_token or not chat_key:
             continue
 
-        context_text = recent_context_text(chat_key, user_text)
+        context_text = build_context(chat_key, user_text)
 
         if should_stop(user_text):
-            expire_chat(chat_key)
             add_history(chat_key, user_text)
             continue
 
-        # 全返信モード。
-        # テキストが来たら、呼びかけ・確率・active状態に関係なく必ず返す。
-        # 停止ワードだけは例外。
         add_history(chat_key, user_text)
-        mark_active(chat_key)
 
         ai_text = ask_arakun(user_text, context_text)
         reply_to_line(reply_token, ai_text)
-        continue
 
     return "OK"
 
@@ -791,5 +561,5 @@ def callback():
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080))
+        port=int(os.environ.get("PORT", 8080)),
     )
