@@ -6,6 +6,7 @@ import time
 import random
 import unicodedata
 import requests
+from difflib import SequenceMatcher
 from collections import deque
 from functools import lru_cache
 from flask import Flask, request, abort
@@ -31,14 +32,14 @@ HASHIMOTO_SHIN_FILE = "hashimoto_shin_examples.txt"
 
 # ===== 返信頻度調整 =====
 # うるさければ下げる。黙りすぎなら上げる。
-RANDOM_JOIN_PROBABILITY = 0.52          # 通常の語録/Excel単語ヒット時の乱入率
-STRONG_JOIN_PROBABILITY = 0.72          # 強い語録ヒット時の乱入率
-EPISODE_JOIN_PROBABILITY = 0.62         # エピソード一致時の乱入率
-ACTIVE_STRONG_CONTEXT_PROBABILITY = 0.94
-ACTIVE_WEAK_CONTEXT_PROBABILITY = 0.72
+RANDOM_JOIN_PROBABILITY = 0.88          # 通常の語録/Excel単語ヒット時の乱入率
+STRONG_JOIN_PROBABILITY = 0.97          # 強い語録ヒット時の乱入率
+EPISODE_JOIN_PROBABILITY = 0.92         # エピソード一致時の乱入率
+ACTIVE_STRONG_CONTEXT_PROBABILITY = 0.98
+ACTIVE_WEAK_CONTEXT_PROBABILITY = 0.88
 
-ACTIVE_MIN_SECONDS = 75
-ACTIVE_MAX_SECONDS = 240
+ACTIVE_MIN_SECONDS = 120
+ACTIVE_MAX_SECONDS = 360
 
 ACTIVE_CHATS = {}
 CHAT_HISTORY = {}
@@ -56,7 +57,7 @@ STOP_WORDS = [
 # 呼ばれていない時は、実務系に割り込まないための保険。
 # ただし呼びかけられた場合は返す。
 UNRELATED_WORDS = [
-    "天気", "ニュース", "研究", "論文", "excel", "エクセル",
+    "天気", "ニュース", "研究", "論文",
     "rで", "anova", "統計", "学会", "メール",
 ]
 
@@ -85,6 +86,7 @@ GENERIC_TRIGGER_BLACKLIST = {
     "いい", "そう", "これ", "それ", "どれ", "ここ", "そこ", "あれ",
     "です", "ます", "した", "する", "ある", "ない", "こと", "もの",
     "www", "wwww", "(emoji)", "(thinking)", "line", "twitter", "instagram",
+    "笑", "草", "w", "ok", "ng", "やばい", "まじ", "えぐい",
 }
 
 
@@ -116,10 +118,10 @@ def load_lines(filename: str, max_lines: int | None = None) -> list[str]:
 SYSTEM_PROMPT = "\n".join(load_lines(PROMPT_FILE))
 
 # 無料Renderで落ちにくい範囲で、前回より参照量を増やす。
-TRIGGER_WORDS = load_lines(TRIGGER_FILE, max_lines=7000)
-EPISODES = load_lines(EPISODE_FILE, max_lines=7000)
+TRIGGER_WORDS = load_lines(TRIGGER_FILE, max_lines=12000)
+EPISODES = load_lines(EPISODE_FILE, max_lines=9000)
 STYLE_EXAMPLES = load_lines(STYLE_EXAMPLE_FILE, max_lines=1400)
-REPLY_PAIRS = load_lines(REPLY_PAIR_FILE, max_lines=4000)
+REPLY_PAIRS = load_lines(REPLY_PAIR_FILE, max_lines=5000)
 HASHIMOTO_SHIN_EXAMPLES = load_lines(HASHIMOTO_SHIN_FILE, max_lines=700)
 
 TRIGGER_WORDS = sorted(set(TRIGGER_WORDS + DEFAULT_TRIGGERS))
@@ -249,7 +251,7 @@ def make_chunks(normalized_text: str) -> tuple[str, ...]:
     return tuple(chunks)
 
 
-def get_trigger_hits(text: str, include_call_words: bool = False, limit: int = 12) -> list[tuple[str, str]]:
+def get_trigger_hits(text: str, include_call_words: bool = False, limit: int = 20) -> list[tuple[str, str]]:
     normalized = normalize_text(text)
     hits = []
 
@@ -399,10 +401,8 @@ def has_context_hit(context_text: str) -> tuple[bool, list[tuple[str, str]], boo
 
 
 def should_randomly_join(user_text: str, context_text: str) -> bool:
-    # 実務系は呼ばれてない限り黙る
-    if looks_unrelated(user_text):
-        return False
-
+    # 先に過去ログ/Excel由来ワードを見る。
+    # ヒットしているなら実務系っぽい単語が混じっても返す。
     has_hit, hits, episode_hit = has_context_hit(context_text)
     if not has_hit:
         return False
@@ -420,15 +420,15 @@ def should_randomly_join(user_text: str, context_text: str) -> bool:
 
 
 def should_continue_active_chat(user_text: str, context_text: str) -> bool:
-    if looks_unrelated(user_text):
-        return False
-
     has_hit, _hits, episode_hit = has_context_hit(context_text)
 
     if has_hit or episode_hit:
         return random.random() < ACTIVE_STRONG_CONTEXT_PROBABILITY
 
-    # 会話中は「それな」「何で？」みたいな短文にもそこそこ返す
+    if looks_unrelated(user_text):
+        return False
+
+    # 会話中は「それな」「何で？」みたいな短文にもかなり返す
     return random.random() < ACTIVE_WEAK_CONTEXT_PROBABILITY
 
 
@@ -443,8 +443,8 @@ def strip_call_words_for_echo(text: str) -> str:
 
 def is_echo_reply(user_text: str, reply_text: str) -> bool:
     """
-    ユーザー発言の単純なおうむ返しを検出する。
-    完全一致、ユーザー文の丸ごと含有、3-gram過剰一致を弾く。
+    ユーザー発言の単純なおうむ返しを厳しめに検出する。
+    完全一致、丸ごと含有、短文コピー、類似度過剰を弾く。
     """
     user_core = strip_call_words_for_echo(user_text)
     reply_norm = normalize_text(reply_text)
@@ -452,8 +452,19 @@ def is_echo_reply(user_text: str, reply_text: str) -> bool:
     if not user_core or not reply_norm:
         return False
 
-    if len(user_core) <= 3:
-        return user_core == reply_norm
+    delete_chars = "!?！？。、,.…・「」『』（）()[]【】"
+    for ch in delete_chars:
+        user_core = user_core.replace(ch, "")
+        reply_norm = reply_norm.replace(ch, "")
+
+    if not user_core or not reply_norm:
+        return False
+
+    if len(user_core) <= 5:
+        if user_core == reply_norm:
+            return True
+        if user_core in reply_norm and len(reply_norm) <= len(user_core) + 6:
+            return True
 
     if user_core == reply_norm:
         return True
@@ -461,7 +472,11 @@ def is_echo_reply(user_text: str, reply_text: str) -> bool:
     if len(user_core) >= 4 and user_core in reply_norm:
         return True
 
-    if len(reply_norm) <= len(user_core) + 8 and reply_norm in user_core:
+    if len(reply_norm) >= 4 and reply_norm in user_core:
+        return True
+
+    ratio = SequenceMatcher(None, user_core, reply_norm).ratio()
+    if ratio >= 0.60 and len(reply_norm) <= int(len(user_core) * 1.8) + 8:
         return True
 
     chunks = set()
@@ -476,8 +491,7 @@ def is_echo_reply(user_text: str, reply_text: str) -> bool:
     overlap = sum(1 for c in chunks if c in reply_norm)
     overlap_ratio = overlap / max(1, len(chunks))
 
-    return overlap_ratio >= 0.72 and len(reply_norm) <= len(user_core) + 20
-
+    return overlap_ratio >= 0.55 and len(reply_norm) <= len(user_core) + 30
 
 def remove_echo_lines(user_text: str, reply_text: str) -> str:
     user_core = strip_call_words_for_echo(user_text)
@@ -504,67 +518,49 @@ def remove_echo_lines(user_text: str, reply_text: str) -> str:
 def anti_echo_fallback(user_text: str, context_text: str) -> str:
     """
     おうむ返しになった時の逃げ。
-    文脈の強い単語に応じて、短くズラした返答を返す。
+    できるだけユーザー発言と同じ語を使わず、過去ログっぽい別フレーズに逃がす。
     """
     normalized_context = normalize_text(context_text)
 
+    candidates = []
+
     if normalize_text("橋本新") in normalized_context:
-        return random.choice([
-            "橋本新名言集です。",
-            "ｷﾞｬｵｫ。",
-            "それは橋本新の方です。",
-        ])
+        candidates += ["ｷﾞｬｵｫ。", "名言集です。", "それは新の方です。"]
 
     if normalize_text("きゃぴ") in normalized_context:
-        return random.choice([
-            "きゃぴい(泣)",
-            "それは良いです！！",
-            "ぼくぅの表情です。",
-        ])
+        candidates += ["ぼくぅの表情です。", "それは良いです！！", "泣きます。"]
 
     if normalize_text("二郎") in normalized_context or normalize_text("野猿") in normalized_context:
-        return random.choice([
-            "二郎に着きました。",
-            "ブックオフのはずが二郎です。",
-            "野猿は難しいです。",
-        ])
+        candidates += ["ブックオフのはずが違う所に着きました。", "そこは難しいです。", "もう着いてます。"]
 
     if normalize_text("牛角") in normalized_context:
-        return random.choice([
-            "牛角多すぎます。",
-            "探すのてこずりましたすみませんでした。",
-            "地図はからっきしだめです。",
-        ])
+        candidates += ["多すぎます。", "探すのてこずりましたすみませんでした。", "地図はからっきしだめです。"]
 
     if normalize_text("エスターク") in normalized_context:
-        return random.choice([
-            "エスターク青くないですか？",
-            "エスタークです！！",
-            "それは通常種ではないです。",
-        ])
+        candidates += ["通常種ではないです。", "色が違います。", "それは良いです！！"]
 
     if normalize_text("フリーポーズ") in normalized_context:
-        return random.choice([
-            "フリーポーズお願いします。",
-            "表情が難しいです。",
-            "かわいいでしょ(ﾉ≧▽≦)ﾉ",
-        ])
+        candidates += ["表情が難しいです。", "かわいいでしょ(ﾉ≧▽≦)ﾉ", "お願いします。"]
 
     if normalize_text("地図") in normalized_context or normalize_text("迷子") in normalized_context:
-        return random.choice([
-            "自分は地図はからっきしだめです。",
-            "交番行きます。",
-            "無理ゲー(；´д⊂)",
-        ])
+        candidates += ["交番行きます。", "無理ゲー(；´д⊂)", "からっきしだめです。"]
 
-    return random.choice([
+    candidates += [
         "難しいです。",
         "それは違います。",
         "お願いします…。",
         "ちょっと分からないです。",
         "そういうことではないです。",
-    ])
+        "これは良いです。",
+        "無理ゲーです。",
+    ]
 
+    random.shuffle(candidates)
+    for c in candidates:
+        if not is_echo_reply(user_text, c):
+            return c
+
+    return "難しいです。"
 
 def avoid_echo(user_text: str, reply_text: str, context_text: str) -> str:
     cleaned = remove_echo_lines(user_text, reply_text)
@@ -572,8 +568,11 @@ def avoid_echo(user_text: str, reply_text: str, context_text: str) -> str:
     if cleaned and not is_echo_reply(user_text, cleaned):
         return cleaned
 
-    return anti_echo_fallback(user_text, context_text)
+    fallback = anti_echo_fallback(user_text, context_text)
+    if not is_echo_reply(user_text, fallback):
+        return fallback
 
+    return "難しいです。"
 
 def shorten_arakun(text: str) -> str:
     if not text:
@@ -617,11 +616,13 @@ def ask_arakun(user_text: str, context_text: str) -> str:
 過去例を無理やり使わない。
 ただし一致単語がある場合は、その単語に関係するエピソードや返答ペアを優先する。
 
-おうむ返しは禁止。
+おうむ返しは禁止。これは最優先。
 ユーザー発言をそのまま繰り返さない。
 ユーザーの語尾だけ変えて返さない。
+ユーザーの文を主語にして「〜です」「〜ですね」と返さない。
 「◯◯？」「◯◯です」みたいに、入力文をほぼコピーした返答は禁止。
 同じ単語を使う場合でも、過去ログ由来の別フレーズ・エピソード断片に変換して返す。
+一致ワードは検索用の手がかりであって、そのまま返答文にコピーしない。
 
 「あはい…」に頼りすぎない。
 口癖だけで返さない。
