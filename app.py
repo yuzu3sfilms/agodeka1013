@@ -32,11 +32,11 @@ HASHIMOTO_SHIN_FILE = "hashimoto_shin_examples.txt"
 
 # ===== 返信頻度調整 =====
 # うるさければ下げる。黙りすぎなら上げる。
-RANDOM_JOIN_PROBABILITY = 0.88          # 通常の語録/Excel単語ヒット時の乱入率
-STRONG_JOIN_PROBABILITY = 0.97          # 強い語録ヒット時の乱入率
-EPISODE_JOIN_PROBABILITY = 0.92         # エピソード一致時の乱入率
-ACTIVE_STRONG_CONTEXT_PROBABILITY = 0.98
-ACTIVE_WEAK_CONTEXT_PROBABILITY = 0.88
+RANDOM_JOIN_PROBABILITY = 1.00          # 通常の語録/Excel単語ヒット時の乱入率
+STRONG_JOIN_PROBABILITY = 1.00          # 強い語録ヒット時の乱入率
+EPISODE_JOIN_PROBABILITY = 1.00         # エピソード一致時の乱入率
+ACTIVE_STRONG_CONTEXT_PROBABILITY = 1.00
+ACTIVE_WEAK_CONTEXT_PROBABILITY = 1.00
 
 ACTIVE_MIN_SECONDS = 120
 ACTIVE_MAX_SECONDS = 360
@@ -360,6 +360,15 @@ def find_style_examples(context_text: str, hits: list[tuple[str, str]]) -> str:
         min_score=45,
         scan_limit=1000
     )
+
+    # 全返信モードでは、過去ログ単語がない普通の発言にも返す。
+    # その時にChatGPTっぽくならないよう、汎用の口調例を渡す。
+    if not matches:
+        if len(STYLE_EXAMPLES) <= 4:
+            matches = STYLE_EXAMPLES
+        else:
+            matches = random.sample(STYLE_EXAMPLES, 4)
+
     return "\n".join(matches)
 
 
@@ -611,10 +620,12 @@ def ask_arakun(user_text: str, context_text: str) -> str:
 あなたは親切なAIではなく、LINEログ由来の「あらくん」です。
 
 最重要:
+このBotは全返信モード。テキストが来たら短く返す。
 いまのユーザー発言・直近文脈に出ている一致単語だけを手がかりにする。
 一致単語と関係ない過去例は無視する。
 過去例を無理やり使わない。
 ただし一致単語がある場合は、その単語に関係するエピソードや返答ペアを優先する。
+一致単語がない場合も無視せず、短い相づち・ズレた一言・質問返しで返す。
 
 おうむ返しは禁止。これは最優先。
 ユーザー発言をそのまま繰り返さない。
@@ -764,32 +775,14 @@ def callback():
             add_history(chat_key, user_text)
             continue
 
-        called = is_called(user_text)
-        active = is_active_chat(chat_key)
-        random_join = should_randomly_join(user_text, context_text)
-
-        # 先に履歴へ入れる。次の「それ」「これ」に効かせる。
+        # 全返信モード。
+        # テキストが来たら、呼びかけ・確率・active状態に関係なく必ず返す。
+        # 停止ワードだけは例外。
         add_history(chat_key, user_text)
+        mark_active(chat_key)
 
-        if called:
-            mark_active(chat_key)
-            ai_text = ask_arakun(user_text, context_text)
-            reply_to_line(reply_token, ai_text)
-            continue
-
-        if active:
-            if should_continue_active_chat(user_text, context_text):
-                mark_active(chat_key)
-                ai_text = ask_arakun(user_text, context_text)
-                reply_to_line(reply_token, ai_text)
-            continue
-
-        if random_join:
-            mark_active(chat_key)
-            ai_text = ask_arakun(user_text, context_text)
-            reply_to_line(reply_token, ai_text)
-            continue
-
+        ai_text = ask_arakun(user_text, context_text)
+        reply_to_line(reply_token, ai_text)
         continue
 
     return "OK"
