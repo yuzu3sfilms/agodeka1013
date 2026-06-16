@@ -31,16 +31,16 @@ HASHIMOTO_SHIN_FILE = "hashimoto_shin_examples.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_REPLY_CHARS = 190
 
-MAX_TRIGGERS = 12000
-MAX_EPISODES = 9000
-MAX_REPLY_PAIRS = 5000
-MAX_STYLE = 1400
-MAX_HASHIMOTO_SHIN = 700
+MAX_TRIGGERS = 5000
+MAX_EPISODES = 4000
+MAX_REPLY_PAIRS = 2500
+MAX_STYLE = 800
+MAX_HASHIMOTO_SHIN = 400
 
-SCAN_EPISODES = 2800
-SCAN_REPLY_PAIRS = 2200
-SCAN_STYLE = 1000
-SCAN_HASHIMOTO_SHIN = 800
+SCAN_EPISODES = 1200
+SCAN_REPLY_PAIRS = 900
+SCAN_STYLE = 500
+SCAN_HASHIMOTO_SHIN = 400
 
 HISTORY_LEN = 5
 CHAT_HISTORY = {}
@@ -402,10 +402,10 @@ def build_prompt(user_text: str, context_text: str) -> tuple[str, str]:
     hits = get_trigger_hits(context_text, limit=20)
     matched = "、".join([original for _nw, original in hits]) if hits else "なし"
 
-    episodes = find_episodes(context_text, hits)
-    reply_pairs = find_reply_pairs(context_text, hits)
-    style = find_style_examples(context_text, hits)
-    hashimoto_shin = find_hashimoto_shin(context_text, hits)
+    episodes = find_episodes(context_text, hits)[:1200]
+    reply_pairs = find_reply_pairs(context_text, hits)[:1200]
+    style = find_style_examples(context_text, hits)[:700]
+    hashimoto_shin = find_hashimoto_shin(context_text, hits)[:700]
 
     system_prompt = SYSTEM_PROMPT + """
 
@@ -510,13 +510,14 @@ def reply_to_line(reply_token: str, text: str):
         "messages": [{"type": "text", "text": text}],
     }
     res = requests.post(url, headers=headers, json=data, timeout=10)
+    print("LINE reply status:", res.status_code)
     if res.status_code >= 300:
         print("LINE reply error:", res.status_code, res.text)
 
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Arakun Bot v8 clean is running."
+    return "AI Arakun Bot v8.1 safe is running."
 
 
 @app.route("/callback", methods=["POST"])
@@ -525,35 +526,53 @@ def callback():
     signature = request.headers.get("X-Line-Signature", "")
 
     if not verify_signature(body, signature):
+        print("signature verification failed")
         abort(400)
 
     events = request.json.get("events", [])
+    print("events:", len(events))
 
     for event in events:
-        if event.get("type") != "message":
-            continue
-
-        message = event.get("message", {})
-        if message.get("type") != "text":
-            continue
-
-        user_text = message.get("text", "")
         reply_token = event.get("replyToken")
-        chat_key = get_chat_key(event)
 
-        if not reply_token or not chat_key:
-            continue
+        try:
+            if event.get("type") != "message":
+                continue
 
-        context_text = build_context(chat_key, user_text)
+            message = event.get("message", {})
+            if message.get("type") != "text":
+                continue
 
-        if should_stop(user_text):
+            user_text = message.get("text", "")
+            chat_key = get_chat_key(event)
+
+            print("received:", user_text)
+
+            if not reply_token or not chat_key:
+                print("missing reply_token or chat_key")
+                continue
+
+            context_text = build_context(chat_key, user_text)
+
+            if should_stop(user_text):
+                add_history(chat_key, user_text)
+                print("stopped by stop word")
+                continue
+
             add_history(chat_key, user_text)
-            continue
 
-        add_history(chat_key, user_text)
+            ai_text = ask_arakun(user_text, context_text)
+            print("reply:", ai_text)
+            reply_to_line(reply_token, ai_text)
 
-        ai_text = ask_arakun(user_text, context_text)
-        reply_to_line(reply_token, ai_text)
+        except Exception as e:
+            print("callback event error:", repr(e))
+            # 全返信モードなので、内部で何か落ちても最低限返す
+            if reply_token:
+                try:
+                    reply_to_line(reply_token, "難しいです。")
+                except Exception as e2:
+                    print("fallback reply failed:", repr(e2))
 
     return "OK"
 
