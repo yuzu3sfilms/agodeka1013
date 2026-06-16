@@ -8,7 +8,7 @@ class HashimotoArataDataStore:
         self.messages = load_jsonl(config.MESSAGES_FILE, config.MAX_MESSAGE_SCAN)
         self.reply_pairs = load_jsonl(config.REPLY_PAIRS_FILE, config.MAX_REPLY_PAIR_SCAN)
         self.style_examples = load_lines(config.STYLE_FILE, config.MAX_STYLE_SCAN)
-        self.keywords = load_lines(config.KEYWORDS_FILE, 5000)
+        self.keywords = load_lines(config.KEYWORDS_FILE, 2500)
         self.keyword_pairs = [(normalize_text(k), k) for k in self.keywords if 2 <= len(normalize_text(k)) <= 40]
 
         self.message_entries = [(normalize_text(m.get("text", "")), m) for m in self.messages]

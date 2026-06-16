@@ -95,4 +95,4 @@ def make_query_terms(text: str, keyword_hits: list[str]) -> list[str]:
     ]}
 
     terms = [t for t in terms if len(t) >= 2 and t not in stop]
-    return sorted(set(terms), key=len, reverse=True)[:80]
+    return sorted(set(terms), key=len, reverse=True)[:40]
