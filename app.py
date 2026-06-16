@@ -31,15 +31,15 @@ HASHIMOTO_SHIN_FILE = "hashimoto_shin_examples.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_REPLY_CHARS = 190
 
-MAX_TRIGGERS = 5000
-MAX_EPISODES = 4000
-MAX_REPLY_PAIRS = 2500
-MAX_STYLE = 800
+MAX_TRIGGERS = 12000
+MAX_EPISODES = 9000
+MAX_REPLY_PAIRS = 5000
+MAX_STYLE = 1400
 MAX_HASHIMOTO_SHIN = 400
 
-SCAN_EPISODES = 1200
-SCAN_REPLY_PAIRS = 900
-SCAN_STYLE = 500
+SCAN_EPISODES = 9000
+SCAN_REPLY_PAIRS = 2600
+SCAN_STYLE = 1000
 SCAN_HASHIMOTO_SHIN = 400
 
 HISTORY_LEN = 5
@@ -252,33 +252,89 @@ def top_entries(context_text: str, entries: list[tuple[str, str]], hits: list[tu
     return [line for _score, line in scored[:limit]]
 
 
+
+def get_query_terms(context_text: str, hits: list[tuple[str, str]]) -> list[str]:
+    """
+    全語録をなるべく満遍なく拾うための検索語生成。
+    特定語を特別扱いしない。
+    - trigger hits
+    - 入力/直近文脈の3〜8文字断片
+    を混ぜて、長い語を優先する。
+    """
+    nt = normalize_text(context_text)
+    terms = [nw for nw, _original in hits if nw]
+
+    for n in (8, 7, 6, 5, 4, 3):
+        for i in range(max(0, len(nt) - n + 1)):
+            term = nt[i:i+n]
+            if term and term not in NORMALIZED_GENERIC:
+                terms.append(term)
+
+    terms = sorted(set(t for t in terms if len(t) >= 2), key=len, reverse=True)
+    return terms[:50]
+
+
+def balanced_score(normalized_context: str, normalized_line: str, keys: list[str], hits: list[tuple[str, str]], terms: list[str]) -> int:
+    """
+    汎用スコア。
+    特定エピソードだけ強くしすぎず、
+    keyword一致・本文一致・断片一致を足し合わせる。
+    """
+    score = 0
+
+    # keyword::episode の keyword が文脈にある時は強い
+    for key in keys[:12]:
+        if key and key not in NORMALIZED_GENERIC and key in normalized_context:
+            score += 140 + min(len(key), 24)
+
+    # trigger hit が行にある時
+    for nw, _original in hits:
+        if nw and nw in normalized_line:
+            score += 90 + min(len(nw), 24)
+
+    # 断片一致。長い断片ほど少し強い。
+    for term in terms:
+        if term and term in normalized_line:
+            if len(term) >= 6:
+                score += 50 + min(len(term), 20)
+            elif len(term) >= 4:
+                score += 28 + min(len(term), 14)
+            else:
+                score += 8
+
+    return score
+
+
 def find_episodes(context_text: str, hits: list[tuple[str, str]]) -> str:
     nt = normalize_text(context_text)
+    terms = get_query_terms(context_text, hits)
     scored = []
 
     for keys, normalized_episode, episode in EPISODE_ENTRIES[:SCAN_EPISODES]:
-        score = 0
-
-        for key in keys[:10]:
-            if key and key not in NORMALIZED_GENERIC and key in nt:
-                score += 120 + min(len(key), 20)
-
-        for nw, _o in hits:
-            if nw in normalized_episode:
-                score += 80 + min(len(nw), 20)
+        score = balanced_score(nt, normalized_episode, keys, hits, terms)
 
         if score > 0:
             scored.append((score, episode))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return "\n".join(unique([episode for _score, episode in scored[:5]]))
-
+    return "\n".join(unique([episode for _score, episode in scored[:7]]))
 
 def find_reply_pairs(context_text: str, hits: list[tuple[str, str]]) -> str:
-    if not hits:
+    terms = get_query_terms(context_text, hits)
+    if not terms:
         return ""
-    return "\n".join(top_entries(context_text, REPLY_ENTRIES, hits, 5, SCAN_REPLY_PAIRS, 50))
 
+    nt = normalize_text(context_text)
+    scored = []
+
+    for normalized_line, line in REPLY_ENTRIES[:SCAN_REPLY_PAIRS]:
+        score = balanced_score(nt, normalized_line, [], hits, terms)
+
+        if score >= 35:
+            scored.append((score, line))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return "\n".join(unique([line for _score, line in scored[:6]]))
 
 def find_style_examples(context_text: str, hits: list[tuple[str, str]]) -> str:
     examples = top_entries(context_text, STYLE_ENTRIES, hits, 4, SCAN_STYLE, 45)
@@ -291,15 +347,23 @@ def find_hashimoto_shin(context_text: str, hits: list[tuple[str, str]]) -> str:
     if not HASHIMOTO_SHIN_ENTRIES:
         return ""
 
-    local_hits = list(hits)
+    terms = get_query_terms(context_text, hits)
     if "橋本新" in context_text:
-        local_hits.append((normalize_text("橋本新"), "橋本新"))
+        terms.append(normalize_text("橋本新"))
 
-    if not local_hits:
+    if not terms:
         return ""
 
-    return "\n".join(top_entries(context_text, HASHIMOTO_SHIN_ENTRIES, local_hits, 4, SCAN_HASHIMOTO_SHIN, 35))
+    nt = normalize_text(context_text)
+    scored = []
 
+    for normalized_line, line in HASHIMOTO_SHIN_ENTRIES[:SCAN_HASHIMOTO_SHIN]:
+        score = balanced_score(nt, normalized_line, [], hits, terms)
+        if score >= 25:
+            scored.append((score, line))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return "\n".join(unique([line for _score, line in scored[:4]]))
 
 def simplify_for_echo(text: str) -> str:
     nt = normalize_text(text)
@@ -422,7 +486,8 @@ def build_prompt(user_text: str, context_text: str) -> tuple[str, str]:
 - 一致ワードは検索用の手がかりであり、そのまま返答文へコピーしない。
 
 返答方針:
-- 一致ワードがある場合、そのワードに関係する過去例だけ使う。
+- 一致ワードや文脈断片がある場合、その語に関係する過去例だけ使う。
+- 特定の語録だけを優遇せず、提示された関連エピソード/返答ペアの中で一番文脈に近いものを使う。
 - 一致ワードと関係ない過去例は無視する。
 - 返答ペアがある場合は、その返し方を最優先で真似る。
 - エピソードや橋本新文脈がある場合は、断片を自然に混ぜる。
@@ -517,7 +582,7 @@ def reply_to_line(reply_token: str, text: str):
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Arakun Bot v8.1 safe is running."
+    return "AI Arakun Bot v8.3 balanced retrieval is running."
 
 
 @app.route("/callback", methods=["POST"])
