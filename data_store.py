@@ -8,7 +8,7 @@ class HashimotoArataDataStore:
         self.messages = load_jsonl(config.MESSAGES_FILE, config.MAX_MESSAGE_SCAN)
         self.reply_pairs = load_jsonl(config.REPLY_PAIRS_FILE, config.MAX_REPLY_PAIR_SCAN)
         self.style_examples = load_lines(config.STYLE_FILE, config.MAX_STYLE_SCAN)
-        self.keywords = load_lines(config.KEYWORDS_FILE, 2500)
+        self.keywords = load_lines(config.KEYWORDS_FILE, 3000)
         self.keyword_pairs = [(normalize_text(k), k) for k in self.keywords if 2 <= len(normalize_text(k)) <= 40]
 
         self.message_entries = [(normalize_text(m.get("text", "")), m) for m in self.messages]
@@ -19,7 +19,21 @@ class HashimotoArataDataStore:
             joined = ctx + "\n" + rep
             self.reply_entries.append((normalize_text(joined), normalize_text(ctx), normalize_text(rep), p))
 
-    def keyword_hits(self, context_text: str, limit: int = 30) -> list[tuple[str, str]]:
+        self.default_replies = self._build_default_replies()
+
+    def _build_default_replies(self):
+        replies = []
+        for s in self.style_examples[:500]:
+            if 1 <= len(s) <= 80:
+                replies.append(s)
+        for m in self.messages[:2000]:
+            t = (m.get("text", "") or "").strip()
+            if 1 <= len(t) <= 80:
+                replies.append(t)
+        replies += ["難しいです。", "お願いします…", "それは違います。", "ちょっと分からないです。", "これは良いです。"]
+        return unique_preserve_order(replies)
+
+    def keyword_hits(self, context_text: str, limit: int = 30):
         nt = normalize_text(context_text)
         hits = []
         for nk, raw in self.keyword_pairs:
@@ -48,24 +62,22 @@ class HashimotoArataDataStore:
 
         reply_scored = []
         for joined_n, ctx_n, rep_n, p in self.reply_entries:
-            # Context match is most important; reply match also useful but weaker.
-            score = self.score_text(ctx_n, terms, context_weight=3) + self.score_text(rep_n, terms, context_weight=1)
+            score = self.score_text(ctx_n, terms, 3) + self.score_text(rep_n, terms, 1)
             if score > 0:
                 reply_scored.append((score, p))
         reply_scored.sort(key=lambda x: x[0], reverse=True)
 
         msg_scored = []
         for text_n, m in self.message_entries:
-            score = self.score_text(text_n, terms, context_weight=1)
+            score = self.score_text(text_n, terms, 1)
             if score > 0:
                 msg_scored.append((score, m))
         msg_scored.sort(key=lambda x: x[0], reverse=True)
 
-        # Style examples: close examples if possible, otherwise random examples.
         style_scored = []
         for s in self.style_examples:
             sn = normalize_text(s)
-            score = self.score_text(sn, terms, context_weight=1)
+            score = self.score_text(sn, terms, 1)
             if score > 0:
                 style_scored.append((score, s))
         style_scored.sort(key=lambda x: x[0], reverse=True)
@@ -80,3 +92,28 @@ class HashimotoArataDataStore:
             "messages": [m for _score, m in msg_scored[:config.TOP_MESSAGES]],
             "style_examples": unique_preserve_order(styles)[:config.TOP_STYLE],
         }
+
+    def local_reply(self, context_text: str, user_text: str = "", found: dict | None = None) -> str:
+        # This must always return something. No Groq required.
+        if found is None:
+            found = self.search(context_text)
+        candidates = []
+        for p in found.get("reply_pairs", []):
+            rep = (p.get("reply", "") or "").strip()
+            if rep:
+                candidates.append(rep)
+        for m in found.get("messages", []):
+            txt = (m.get("text", "") or "").strip()
+            if txt:
+                candidates.append(txt)
+        for s in found.get("style_examples", []):
+            if s and s.strip():
+                candidates.append(s.strip())
+        if self.default_replies:
+            candidates.extend(random.sample(self.default_replies, min(25, len(self.default_replies))))
+        random.shuffle(candidates)
+        for c in candidates:
+            c = str(c).strip()
+            if 1 <= len(c) <= config.MAX_REPLY_CHARS:
+                return c
+        return "難しいです。"

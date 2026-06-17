@@ -41,7 +41,7 @@ def should_stop(text: str) -> bool:
 def reply_to_line(reply_token: str, text: str):
     url = "https://api.line.me/v2/bot/message/reply"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}"}
-    payload = {"replyToken": reply_token, "messages": [{"type": "text", "text": text}]}
+    payload = {"replyToken": reply_token, "messages": [{"type": "text", "text": text or "難しいです。"}]}
     res = requests.post(url, headers=headers, json=payload, timeout=10)
     log("LINE reply status:", res.status_code)
     if res.status_code >= 300:
@@ -50,7 +50,7 @@ def reply_to_line(reply_token: str, text: str):
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v2 is running."
+    return "AI Hashimoto Arata v2.2 guaranteed reply is running."
 
 
 @app.route("/callback", methods=["POST"])
@@ -60,10 +60,8 @@ def callback():
     if not verify_signature(body, signature):
         log("signature verification failed")
         abort(400)
-
     events = request.json.get("events", [])
     log("events:", len(events))
-
     for event in events:
         reply_token = event.get("replyToken")
         try:
@@ -73,18 +71,16 @@ def callback():
             if message.get("type") != "text":
                 continue
             user_text = message.get("text", "")
-            chat_key = get_chat_key(event)
-            if not reply_token or not chat_key:
+            chat_key = get_chat_key(event) or "unknown"
+            if not reply_token:
+                log("missing reply_token")
                 continue
-
             context_text = memory.context(chat_key, user_text)
             memory.add(chat_key, user_text)
-
             if should_stop(user_text):
                 log("stopped")
                 continue
-
-            reply = bot.generate_reply(user_text, context_text)
+            reply = bot.generate_reply(user_text, context_text) or "難しいです。"
             log("received:", user_text)
             log("reply:", reply)
             reply_to_line(reply_token, reply)
