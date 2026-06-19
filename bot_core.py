@@ -3,7 +3,7 @@ from openai import OpenAI
 import config
 from text_utils import load_text, context_to_text
 from data_store import HashimotoArataDataStore
-from anti_echo import finalize, fallback_reply
+from anti_echo import finalize_reply, fallback_reply
 
 
 class HashimotoArataBot:
@@ -71,7 +71,7 @@ class HashimotoArataBot:
 
     def generate_reply(self, user_text: str, context_text: str) -> str:
         found = self.store.search(context_text)
-        local = finalize(user_text, self.store.local_reply(context_text, user_text, found))
+        local = finalize_reply(user_text, self.store.local_reply(context_text, user_text, found))
         if time.time() < self.groq_disabled_until:
             self._log("Groq cooldown active; local reply")
             return local
@@ -84,7 +84,7 @@ class HashimotoArataBot:
                 max_tokens=config.MAX_TOKENS,
             )
             raw = response.choices[0].message.content or ""
-            return finalize(user_text, raw)
+            return finalize_reply(user_text, raw)
         except Exception as e:
             print("Groq error:", repr(e))
             if self.is_rate_limit_error(e):

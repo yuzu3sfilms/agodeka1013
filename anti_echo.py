@@ -153,3 +153,9 @@ def finalize_reply(user_text: str, raw_text: str, context_text: str = "") -> str
         return fallback_reply(user_text, context_text)
 
     return reply
+
+
+
+# Backward-compatible alias.
+def finalize(user_text: str, raw_text: str, context_text: str = "") -> str:
+    return finalize_reply(user_text, raw_text, context_text)
