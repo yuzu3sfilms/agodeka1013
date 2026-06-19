@@ -29,3 +29,8 @@ TOP_STYLE = int(os.environ.get("TOP_STYLE", "2"))
 DEBUG_LOG = os.environ.get("DEBUG_LOG", "1") == "1"
 USE_LOCAL_FALLBACK_ON_RATE_LIMIT = True
 RATE_LIMIT_COOLDOWN_SECONDS = int(os.environ.get("RATE_LIMIT_COOLDOWN_SECONDS", "900"))
+
+
+# Tone safety: imitate Arata, but do not over-reproduce anger.
+ANGER_FILTER_ENABLED = os.environ.get("ANGER_FILTER_ENABLED", "1") == "1"
+ALLOW_ANGRY_REPLY_WHEN_USER_ANGRY = os.environ.get("ALLOW_ANGRY_REPLY_WHEN_USER_ANGRY", "0") == "1"
