@@ -4,16 +4,16 @@ from collections import defaultdict, deque
 
 from openai import OpenAI
 
-from store import HashimotoStore
+from retriever import Retriever
 from utils import clean_reply
 
 
 class HashimotoArataBot:
     def __init__(self):
         self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.max_tokens = int(os.environ.get("MAX_TOKENS", "240"))
-        self.temperature = float(os.environ.get("TEMPERATURE", "1.05"))
-        self.history_len = int(os.environ.get("HISTORY_LEN", "5"))
+        self.max_tokens = int(os.environ.get("MAX_TOKENS", "220"))
+        self.temperature = float(os.environ.get("TEMPERATURE", "1.0"))
+        self.history_len = int(os.environ.get("HISTORY_LEN", "6"))
         self.cooldown_seconds = int(os.environ.get("RATE_LIMIT_COOLDOWN_SECONDS", "900"))
         self.groq_disabled_until = 0.0
 
@@ -22,14 +22,18 @@ class HashimotoArataBot:
             base_url="https://api.groq.com/openai/v1",
         )
 
-        self.store = HashimotoStore()
+        self.retriever = Retriever()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
+        self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
 
-        with open("profile.txt", "r", encoding="utf-8") as f:
-            self.profile = f.read()
+        with open("persona.md", "r", encoding="utf-8") as f:
+            self.persona = f.read()
 
-    def remember(self, chat_id: str, text: str):
+    def remember_user(self, chat_id: str, text: str):
         self.histories[chat_id].append(text)
+
+    def remember_bot(self, chat_id: str, text: str):
+        self.last_bot_replies[chat_id].append(text)
 
     def context(self, chat_id: str, user_text: str) -> str:
         return "\n".join(list(self.histories[chat_id]) + [user_text])
@@ -40,62 +44,86 @@ class HashimotoArataBot:
     def disable_groq(self):
         self.groq_disabled_until = time.time() + self.cooldown_seconds
 
-    def prompt(self, user_text: str, context: str, hits: dict) -> tuple[str, str]:
-        pairs = "\n".join(
-            f"相手:{p.get('context_text','')}\n橋本新:{p.get('reply','')}"
+    def emergency_reply(self, user_text: str) -> str:
+        t = user_text or ""
+        if "嫌い" in t:
+            return "嫌いではないです。"
+        if any(x in t for x in ["おい", "壊れ", "こわれ"]):
+            return "何ですか？"
+        if "?" in t or "？" in t:
+            return "どういうことですか？"
+        if any(x in t for x in ["あらくん", "橋本", "あらた"]):
+            return "呼びました？"
+        return "難しいです。"
+
+    def build_prompt(self, user_text: str, context: str, hits: dict, chat_id: str):
+        pairs = "\n\n".join(
+            f"【過去文脈】\n{p.get('context_text','')}\n【橋本新の返答】\n{p.get('reply','')}"
             for p in hits["pairs"][:6]
         ) or "なし"
 
         messages = "\n".join(
-            f"{m.get('text','')}"
-            for m in hits["messages"][:5]
+            f"- {m.get('text','')}"
+            for m in hits["messages"][:6]
         ) or "なし"
 
         recent = "\n".join(context.splitlines()[-self.history_len:])
+        recent_bot = "\n".join(self.last_bot_replies[chat_id]) or "なし"
 
-        system = self.profile + """
+        system = self.persona + """
 
-実行ルール:
-- 似た返答ペアを最優先で真似る。
-- 完全コピーではなく、今回の会話に自然に合わせる。
-- 感情トーンを補正しない。低温化しない。
-- テンションが高い文脈では高くしてよい。
-- 強い表現も、過去ログ上・文脈上自然なら使ってよい。
-- 返答の文字数を無理に短くしない。過去例に合わせる。
-- ただしChatGPT風に説明しない。
-- ユーザー文をそのまま繰り返さない。
+生成ルール:
+- 参考例をそのまま貼るのではなく、今回の文脈に合わせて橋本新として生成する。
+- 近い過去文脈がある場合、その返し方・温度・語尾を強く参考にする。
+- 近い過去文脈が弱い場合でも、「んー」「はい」「うん」だけに逃げない。
+- 直近の自分の返答と同じ返答を繰り返さない。
+- 感情やテンションを勝手に低く丸めない。
+- 文字数を無理に短くしない。
+- ChatGPT風に説明しない。
+- ユーザー発言の丸写しをしない。
 """
 
         user = f"""
 直近会話:
 {recent}
 
-今回:
+今回の相手発言:
 {user_text}
 
-似た過去の文脈→橋本新返答:
+直近の自分の返答（繰り返し禁止）:
+{recent_bot}
+
+検索された近い「文脈→橋本新返答」:
 {pairs}
 
 関連する本人発言:
 {messages}
 
-橋本新として、文脈・テンション・長さを丸めずに返す。
+橋本新として自然に返答。
 """
         return system, user
 
     def reply(self, chat_id: str, user_text: str) -> str:
         context = self.context(chat_id, user_text)
+        hits = self.retriever.search(context)
 
-        # 全返信保証：最初にローカル返答を確保
-        local = clean_reply(user_text, self.store.local_reply(context))
-        hits = self.store.search(context)
+        print(
+            "retrieval",
+            f"pairs={len(hits['pairs'])}",
+            f"messages={len(hits['messages'])}",
+            f"scores={hits.get('pair_scores', [])[:3]}",
+            flush=True,
+        )
 
         if not self.groq_available():
-            self.remember(chat_id, user_text)
-            return local
+            print("generation path: emergency_local_cooldown", flush=True)
+            answer = self.emergency_reply(user_text)
+            self.remember_user(chat_id, user_text)
+            self.remember_bot(chat_id, answer)
+            return answer
 
         try:
-            system, user = self.prompt(user_text, context, hits)
+            system, user = self.build_prompt(user_text, context, hits, chat_id)
             res = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -108,11 +136,19 @@ class HashimotoArataBot:
             raw = res.choices[0].message.content or ""
             answer = clean_reply(user_text, raw)
 
+            if not answer or answer in set(self.last_bot_replies[chat_id]):
+                print("generation path: groq_bad_cleaned_using_emergency", flush=True)
+                answer = self.emergency_reply(user_text)
+            else:
+                print("generation path: groq", flush=True)
+
         except Exception as e:
-            print("Groq error:", repr(e))
+            print("Groq error:", repr(e), flush=True)
             if "429" in str(e) or "rate_limit" in str(e) or "TPD" in str(e):
                 self.disable_groq()
-            answer = local
+            print("generation path: emergency_local_exception", flush=True)
+            answer = self.emergency_reply(user_text)
 
-        self.remember(chat_id, user_text)
-        return answer or local or "難しいです。"
+        self.remember_user(chat_id, user_text)
+        self.remember_bot(chat_id, answer)
+        return answer

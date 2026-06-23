@@ -6,14 +6,20 @@ from pathlib import Path
 from utils import normalize
 
 
+GENERIC_TOO_SHORT = {
+    "んー", "うん", "はい", "えー", "あー", "まあ", "いや", "そう", "おい",
+    "？", "はい。", "うん。", "んー。", "え", "え？", "ん？",
+}
+
+
 class HashimotoStore:
     """
-    v5.4 no tone limit.
+    v5.5 no repeat / context fix.
 
     - 感情補正なし
     - テンション抑制なし
     - 文字数制限なし
-    - 返答選択は文脈一致を最優先
+    - ただし「んー」等の極短曖昧返答が連発する問題を防ぐ
     - 起動時巨大indexは作らずRender安全性は維持
     """
 
@@ -26,9 +32,9 @@ class HashimotoStore:
         self.emotion_profile = self._load_json("emotion_profile.json", {})
         self.presence_profile = self._load_json("presence_profile.json", {})
 
-        self.max_pair_scan = int(os.environ.get("MAX_PAIR_SCAN", "2200"))
-        self.max_message_scan = int(os.environ.get("MAX_MESSAGE_SCAN", "2200"))
-        self.max_keywords = int(os.environ.get("MAX_KEYWORDS", "3500"))
+        self.max_pair_scan = int(os.environ.get("MAX_PAIR_SCAN", "2600"))
+        self.max_message_scan = int(os.environ.get("MAX_MESSAGE_SCAN", "2600"))
+        self.max_keywords = int(os.environ.get("MAX_KEYWORDS", "4000"))
 
         self.keywords = self._load_keywords_small()
         self.fallback_replies = self._load_fallback_replies()
@@ -72,18 +78,37 @@ class HashimotoStore:
                 except json.JSONDecodeError:
                     continue
 
+    def _is_bad_fallback(self, text: str) -> bool:
+        t = (text or "").strip()
+        if not t:
+            return True
+        if t in GENERIC_TOO_SHORT:
+            return True
+        # extremely short replies are allowed only if expressive, not bland
+        if len(t) <= 2 and not any(x in t for x in ["？", "！", "w", "ｗ", "泣"]):
+            return True
+        return False
+
     def _load_fallback_replies(self) -> list[str]:
         replies = []
-        for p in self._iter_jsonl(self.pairs_path, 700):
+        for p in self._iter_jsonl(self.pairs_path, 900):
             r = (p.get("reply") or "").strip()
-            if r:
+            if r and not self._is_bad_fallback(r):
                 replies.append(r)
-        for m in self._iter_jsonl(self.messages_path, 700):
+        for m in self._iter_jsonl(self.messages_path, 900):
             t = (m.get("text") or "").strip()
-            if t:
+            if t and not self._is_bad_fallback(t):
                 replies.append(t)
 
-        replies += ["難しいです。", "お願いします…。", "ちょっと分からないです。", "それは違います。", "これは良いです。"]
+        replies += [
+            "難しいです。",
+            "お願いします…。",
+            "ちょっと分からないです。",
+            "それは違います。",
+            "これは良いです。",
+            "何ですか？",
+            "どういうことですか？",
+        ]
 
         out, seen = [], set()
         for r in replies:
@@ -128,6 +153,12 @@ class HashimotoStore:
         if not has_long:
             score = int(score * 0.4)
 
+        # Avoid bland micro-replies unless the match is genuinely strong.
+        if candidate_text.strip() in GENERIC_TOO_SHORT:
+            score -= 80
+        elif len(candidate_text.strip()) <= 2:
+            score -= 40
+
         return score
 
     def search(self, context: str, top_pairs: int = 8, top_messages: int = 6) -> dict:
@@ -151,7 +182,8 @@ class HashimotoStore:
             score = 20 + self._score(query_terms, candidate)
             score += self._score(query_terms, p.get("last_other", ""))
 
-            if score > 25:
+            # Very weak matches should not produce random bland replies.
+            if score > 35:
                 pair_hits.append((score, p))
 
         pair_hits.sort(key=lambda x: x[0], reverse=True)
@@ -170,7 +202,7 @@ class HashimotoStore:
             ])
 
             score = self._score(query_terms, candidate)
-            if score > 18:
+            if score > 28:
                 msg_hits.append((score, m))
 
         msg_hits.sort(key=lambda x: x[0], reverse=True)
@@ -182,18 +214,37 @@ class HashimotoStore:
             "message_scores": [s for s, _m in msg_hits[:top_messages]],
         }
 
-    def local_reply(self, context: str) -> str:
+    def local_candidates(self, context: str) -> list[str]:
         hits = self.search(context, top_pairs=10, top_messages=8)
         candidates = []
         candidates += [p.get("reply", "") for p in hits["pairs"]]
         candidates += [m.get("text", "") for m in hits["messages"]]
 
         if self.fallback_replies:
-            candidates += random.sample(self.fallback_replies, min(25, len(self.fallback_replies)))
+            candidates += random.sample(self.fallback_replies, min(30, len(self.fallback_replies)))
 
+        out = []
+        seen = set()
         for c in candidates:
             c = str(c).strip()
-            if c:
+            if not c:
+                continue
+            if c in seen:
+                continue
+            out.append(c)
+            seen.add(c)
+        return out
+
+    def local_reply(self, context: str, avoid: set[str] | None = None) -> str:
+        avoid = avoid or set()
+        candidates = self.local_candidates(context)
+
+        for c in candidates:
+            if c not in avoid and not self._is_bad_fallback(c):
+                return c
+
+        for c in candidates:
+            if c not in avoid:
                 return c
 
         return "難しいです。"

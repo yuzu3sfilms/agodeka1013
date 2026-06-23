@@ -62,13 +62,8 @@ def push_line(to_id: str, text: str) -> bool:
     if not to_id or to_id == "unknown":
         log("push skipped: no target id")
         return False
-
     url = "https://api.line.me/v2/bot/message/push"
-    payload = {
-        "to": to_id,
-        "messages": [{"type": "text", "text": text or "難しいです。"}],
-    }
-
+    payload = {"to": to_id, "messages": [{"type": "text", "text": text or "難しいです。"}]}
     try:
         res = requests.post(url, headers=line_headers(), json=payload, timeout=10)
         log("LINE push status:", res.status_code)
@@ -82,27 +77,17 @@ def push_line(to_id: str, text: str) -> bool:
 
 def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -> bool:
     url = "https://api.line.me/v2/bot/message/reply"
-    payload = {
-        "replyToken": reply_token,
-        "messages": [{"type": "text", "text": text or "難しいです。"}],
-    }
-
+    payload = {"replyToken": reply_token, "messages": [{"type": "text", "text": text or "難しいです。"}]}
     try:
         res = requests.post(url, headers=line_headers(), json=payload, timeout=10)
         log("LINE reply status:", res.status_code)
-
         if 200 <= res.status_code < 300:
             return True
-
         log("LINE reply error:", res.status_code, res.text)
-
-        # Cold start can make replyToken stale. Push fallback uses groupId/roomId/userId.
         if fallback_to_id:
             log("trying push fallback")
             return push_line(fallback_to_id, text)
-
         return False
-
     except Exception as e:
         log("LINE reply exception:", repr(e))
         if fallback_to_id:
@@ -113,16 +98,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v5.3 cold-start push fallback is running."
+    return "AI Hashimoto Arata v6.1 lite generator is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {
-        "ok": True,
-        "version": "v5.3-cold-start-push-fallback",
-        "time": int(time.time()),
-    }
+    return {"ok": True, "version": "v6.1-lite-generator", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
@@ -146,48 +127,40 @@ def callback():
 
     for event in events:
         reply_token = event.get("replyToken")
-
         try:
             log("event type:", event.get("type"))
-
             if event.get("type") != "message":
                 continue
 
             message = event.get("message", {})
             log("message type:", message.get("type"))
-
             if message.get("type") != "text":
                 log("ignored non-text")
                 continue
 
             user_text = message.get("text", "")
             chat_id = get_chat_id(event)
-
             log("received:", user_text)
             log("chat_id:", chat_id)
 
-            if not reply_token:
-                log("missing reply_token; using push if possible")
-                answer = bot.reply(chat_id, user_text)
-                push_line(chat_id, answer)
-                continue
-
             if is_stop(user_text):
-                bot.remember(chat_id, user_text)
+                bot.remember_user(chat_id, user_text)
                 log("stopped")
                 continue
 
             answer = bot.reply(chat_id, user_text)
             log("reply:", answer)
-            reply_line(reply_token, answer, fallback_to_id=chat_id)
+
+            if reply_token:
+                reply_line(reply_token, answer, fallback_to_id=chat_id)
+            else:
+                push_line(chat_id, answer)
 
         except Exception as e:
             log("callback event error:", repr(e))
+            fallback = "難しいです。"
             if reply_token:
-                try:
-                    reply_line(reply_token, "難しいです。", fallback_to_id=get_chat_id(event))
-                except Exception as e2:
-                    log("fallback reply failed:", repr(e2))
+                reply_line(reply_token, fallback, fallback_to_id=get_chat_id(event))
 
     return "OK"
 

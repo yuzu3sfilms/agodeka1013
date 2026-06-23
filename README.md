@@ -1,91 +1,81 @@
-# AI橋本新 v5 presence engine
+# AI橋本新 v6.1 lite generator
 
-## 目的
+## これは何
 
-これは単なるLINE Botではなく、かつてLINEグループにいた橋本 新（はしもと あらた）が抜けた穴を、過去ログとExcel由来データからできる限り自然に埋めるAIアカウント。
+v6の根本修正版を、GitHubの25MB制限に収まるように作り直した軽量版。
 
-v4からさらに、感情だけでなく「反応機能」まで再現するようにした。
+## v6.0で失敗した理由
 
-## v5の強化点
+`data/hashimoto.db` が大きすぎた。
 
-### 1. presence_profile.json
+- 展開後: 約119MB
+- zip後: 約40.5MB
 
-本人の存在感をデータ化。
+GitHubの25MB制限を超えた。
 
-- 返答ペア数
-- 発言数
-- 返答長
-- 感情分布
-- 反応機能分布
-- ふるまいタグ分布
+## v6.1の方針
 
-### 2. response_function
+DB同梱をやめた。
 
-各返答に以下のような機能ラベルを付与。
-
-- plain_reply
-- ask_back
-- difficulty
-- appeal
-- positive
-- high_reaction
-- tease
-- correction
-
-これにより、単語が似ている返答ではなく、
-「この場面では橋本新は質問返しするのか、弱るのか、普通に返すのか」を選びやすくした。
-
-### 3. behavior_tags
-
-各返答に以下のようなタグを追加。
-
-- very_short
-- short
-- medium
-- question
-- period
-- ellipsis
-- exclamation
-- deferential
-- difficulty
-- crying_marker
-- laugh
-- signature_high
-
-### 4. 感情トーン
-
-v4の emotion を維持しつつ、response_function と合わせて検索スコアに入れた。
-
-### 5. 全返信保証
-
-Groq制限時はローカル返答。
-ローカル返答も、文脈・感情・反応機能に近い過去返答を優先する。
-
-## ファイル構成
+代わりに、1MB台のJSONLデータを使って、
 
 ```text
-app.py
-bot.py
-store.py
-utils.py
-profile.txt
-requirements.txt
-Procfile
-README.md
-build_report.json
-data/
-  pairs.jsonl
-  messages.jsonl
-  keywords.txt
-  style_profile.json
-  emotion_profile.json
-  presence_profile.json
-  source_dataset_report.json
+LINE受信
+↓
+JSONLから近い過去文脈を検索
+↓
+Groqに参考例として渡す
+↓
+Groqが橋本新として生成
+↓
+LINE返信
 ```
 
-## Render環境変数
+にした。
 
-必須:
+## 根本修正ポイント
+
+### 廃止
+
+- ローカル引用ガチャ
+- 弱い検索結果からのランダム返答
+- `んー` 連発
+- 巨大SQLite DB同梱
+
+### 維持
+
+- 過去ログ検索
+- Groq生成
+- 全返信保証
+- 冷スタートpush fallback
+- Render safe
+- おうむ返し防止
+- ChatGPT臭除去
+
+## ログ
+
+正常時:
+
+```text
+retrieval pairs=... messages=... scores=...
+generation path: groq
+reply: ...
+LINE reply status: 200
+```
+
+Groq制限時:
+
+```text
+generation path: emergency_local_cooldown
+```
+
+Groqエラー時:
+
+```text
+generation path: emergency_local_exception
+```
+
+## 必須環境変数
 
 ```text
 LINE_CHANNEL_SECRET
@@ -93,12 +83,15 @@ LINE_CHANNEL_ACCESS_TOKEN
 GROQ_API_KEY
 ```
 
-任意:
+## 任意環境変数
 
 ```text
-GROQ_MODEL=llama-3.3-70b-versatile
-MAX_TOKENS=80
-HISTORY_LEN=4
+MAX_TOKENS=220
+TEMPERATURE=1.0
+HISTORY_LEN=6
+MAX_PAIR_SCAN=3200
+MAX_MESSAGE_SCAN=2400
+MAX_KEYWORDS=4500
 RATE_LIMIT_COOLDOWN_SECONDS=900
 DEBUG_LOG=1
 ```

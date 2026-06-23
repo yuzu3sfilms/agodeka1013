@@ -33,7 +33,7 @@ def too_similar(user_text: str, reply: str) -> bool:
         return True
     if len(r) >= 4 and r in u:
         return True
-    return SequenceMatcher(None, u, r).ratio() >= 0.70 and len(r) <= len(u) + 20
+    return SequenceMatcher(None, u, r).ratio() >= 0.72 and len(r) <= len(u) + 20
 
 
 def remove_ai_phrases(reply: str) -> str:
@@ -47,20 +47,10 @@ def remove_ai_phrases(reply: str) -> str:
     return reply.strip()
 
 
-def too_harsh(text: str) -> bool:
-    # v5.4: 感情トーン補正なし。強い語調も原則として過去ログ通り扱う。
-    # store.py互換のため関数名だけ残す。
-    return False
-
-
-def clean_reply(user_text: str, reply: str, limit: int | None = None) -> str:
-    # v5.4: 文字数制限なし。改行数制限なし。
+def clean_reply(user_text: str, reply: str) -> str:
     reply = remove_ai_phrases(reply or "").strip()
     if not reply:
-        return "難しいです。"
-
-    # おうむ返しだけは残す。
+        return ""
     if too_similar(user_text, reply):
-        return "難しいです。"
-
+        return ""
     return reply
