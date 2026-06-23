@@ -13,13 +13,6 @@ def normalize(text) -> str:
     return text
 
 
-def trim_reply(text: str, limit: int = 120) -> str:
-    text = (text or "").strip()
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    text = "\n".join(lines[:2])
-    return text[:limit] if text else "難しいです。"
-
-
 def strip_call_names(text: str) -> str:
     t = normalize(text)
     for name in CALL_NAMES:
@@ -40,43 +33,34 @@ def too_similar(user_text: str, reply: str) -> bool:
         return True
     if len(r) >= 4 and r in u:
         return True
-    return SequenceMatcher(None, u, r).ratio() >= 0.66 and len(r) <= len(u) + 20
-
-
-HARSH = [
-    "黙", "うるさ", "ふざけ", "キレ", "怒", "キモ", "きも",
-    "バカ", "馬鹿", "カス", "ゴミ", "クソ", "くそ",
-    "消え", "殴", "殺", "死", "許さ", "最悪", "嫌い", "帰れ",
-]
-
-
-def harsh_score(text: str) -> int:
-    nt = normalize(text)
-    score = sum(1 for w in HARSH if normalize(w) in nt)
-    if text.count("!") + text.count("！") >= 4:
-        score += 1
-    return score
-
-
-def too_harsh(text: str) -> bool:
-    return harsh_score(text) >= 2
+    return SequenceMatcher(None, u, r).ratio() >= 0.70 and len(r) <= len(u) + 20
 
 
 def remove_ai_phrases(reply: str) -> str:
     banned = [
         "こんにちは", "もちろんです", "ご質問ありがとうございます", "AIとして",
         "何かお手伝い", "以下の", "ポイントは", "要するに", "まとめると",
-        "橋本新として", "私は", "申し訳ありません",
+        "橋本新として", "私はAI", "申し訳ありません",
     ]
     for b in banned:
         reply = reply.replace(b, "")
     return reply.strip()
 
 
-def clean_reply(user_text: str, reply: str, limit: int = 120) -> str:
-    reply = trim_reply(remove_ai_phrases(reply), limit=limit)
+def too_harsh(text: str) -> bool:
+    # v5.4: 感情トーン補正なし。強い語調も原則として過去ログ通り扱う。
+    # store.py互換のため関数名だけ残す。
+    return False
+
+
+def clean_reply(user_text: str, reply: str, limit: int | None = None) -> str:
+    # v5.4: 文字数制限なし。改行数制限なし。
+    reply = remove_ai_phrases(reply or "").strip()
+    if not reply:
+        return "難しいです。"
+
+    # おうむ返しだけは残す。
     if too_similar(user_text, reply):
         return "難しいです。"
-    if too_harsh(reply):
-        return "難しいです。"
-    return reply or "難しいです。"
+
+    return reply
