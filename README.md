@@ -1,96 +1,115 @@
-# AI橋本新 v7 trigger episode engine
+# AI橋本新 v8 keyword-only clean
 
-## 根本修正
+## 目的
 
-v6.1でも会話が成り立たなかった主因は、キーワード/語録/固有名が出ても、
-それに紐づくエピソードを強制発火させる仕組みがなかったこと。
+これまでの設計を根本的に畳み直した版。
 
-つまり、
+v8は「全発言に返すBot」ではない。
+橋本新関連のキーワード・語録・固有名・エピソード話題が出た時だけ反応する。
+
+## 重要な方針
+
+### 1. キーワードがない発言には反応しない
+
+通常会話に無理に入らない。
+
+ログ:
+
+```text
+trigger_check hits=[]
+generation path: no_trigger_ignore
+ignored: no trigger
+```
+
+この場合は仕様通り無視。
+
+### 2. キーワードは網羅重視
+
+元LINEログ、Excel、既存処理済みデータから再抽出し、
+3000個のtriggerを作成。
+
+```text
+data/triggers.json
+data/trigger_keywords.txt
+```
+
+### 3. 怒りの感情は切り離し
+
+怒り・罵倒・攻撃的な返答例は、プロンプトへ渡す候補から除外。
+trigger自体は拾えるが、怒り人格としては再現しない。
+
+### 4. ファイル構成を最小化
+
+中核はこれだけ。
+
+```text
+app.py
+bot.py
+trigger_engine.py
+utils.py
+persona.md
+requirements.txt
+Procfile
+data/
+  triggers.json
+  trigger_keywords.txt
+```
+
+## 代表trigger
 
 ```text
 牛角
 二郎
 野猿
-ぼくぅ
 きゃぴ
+きゃぴい
+ぼくぅ
+かわいいでしょ
 フリーポーズ
 無理ゲー
 玩具
+ｷﾞｬｵ
 トーマス
 アナザーアラクン
+橋本新名言集
+顎
+AGODEKA
+ラーメン
+焼肉
+カラオケ
+筋肉
+スクワット
+ゴールドジム
+プロテイン
+小杉湯
+銭湯
+ムタ
+中山
+富澤
+貴文
+土居
+どいくん
+塩田
 ```
 
-などが出ても、通常検索の一部に埋もれていた。
+## ログ確認
 
-## v7で追加したもの
-
-### data/trigger_index.json
-
-900個のtriggerを作成。
-
-各triggerには、
-
-- docfreq
-- freq
-- 関連する文脈
-- 直前発言
-- 橋本新の返答例
-
-を入れている。
-
-### data/trigger_keywords.txt
-
-trigger一覧。
-
-### trigger_search
-
-ユーザー発言にtriggerが含まれたら、通常検索スコアに関係なく `trigger_hits` として取得。
-
-### prompt強制
-
-triggerが出た場合、
+キーワードに反応した場合:
 
 ```text
-関連エピソード/語録/過去の返し方を必ず反応に混ぜる
-triggerが出ているのに一般返答だけで流さない
+trigger_check hits=['牛角']
+generation path: groq_trigger
+reply: ...
+LINE reply status: 200
 ```
 
-と明示している。
-
-## ログ
-
-triggerが効いていればRender logsにこう出る。
+キーワードなし:
 
 ```text
-retrieval triggers=['牛角'] pairs=... messages=... scores=...
-generation path: groq
+trigger_check hits=[]
+generation path: no_trigger_ignore
+ignored: no trigger
 ```
-
-複数なら:
-
-```text
-retrieval triggers=['二郎', '野猿'] pairs=... messages=...
-```
-
-ここが空なら、trigger抽出または一致の問題。
-
-## 重要な変更
-
-### 廃止
-
-- キーワードが通常検索に埋もれる構造
-- ローカル引用ガチャ
-- 弱い検索結果からのランダム返答
-- 「んー」連発
-
-### 維持
-
-- Groq生成
-- 全返信保証
-- 冷スタートpush fallback
-- Render safe
-- おうむ返し防止
-- ChatGPT臭除去
 
 ## 必須環境変数
 
@@ -103,13 +122,11 @@ GROQ_API_KEY
 ## 任意環境変数
 
 ```text
+MAX_TRIGGER_HITS=6
+MAX_TRIGGER_EXAMPLES=5
 MAX_TOKENS=260
-TEMPERATURE=1.03
+TEMPERATURE=1.02
 HISTORY_LEN=6
-MAX_PAIR_SCAN=3200
-MAX_MESSAGE_SCAN=2400
-MAX_KEYWORDS=4500
-MAX_TRIGGER_HITS=5
 RATE_LIMIT_COOLDOWN_SECONDS=900
 DEBUG_LOG=1
 ```

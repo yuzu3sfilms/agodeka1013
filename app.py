@@ -59,11 +59,11 @@ def line_headers():
 
 
 def push_line(to_id: str, text: str) -> bool:
-    if not to_id or to_id == "unknown":
-        log("push skipped: no target id")
+    if not to_id or to_id == "unknown" or not text:
+        log("push skipped")
         return False
     url = "https://api.line.me/v2/bot/message/push"
-    payload = {"to": to_id, "messages": [{"type": "text", "text": text or "難しいです。"}]}
+    payload = {"to": to_id, "messages": [{"type": "text", "text": text}]}
     try:
         res = requests.post(url, headers=line_headers(), json=payload, timeout=10)
         log("LINE push status:", res.status_code)
@@ -76,8 +76,12 @@ def push_line(to_id: str, text: str) -> bool:
 
 
 def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -> bool:
+    if not text:
+        log("reply skipped: empty answer")
+        return False
+
     url = "https://api.line.me/v2/bot/message/reply"
-    payload = {"replyToken": reply_token, "messages": [{"type": "text", "text": text or "難しいです。"}]}
+    payload = {"replyToken": reply_token, "messages": [{"type": "text", "text": text}]}
     try:
         res = requests.post(url, headers=line_headers(), json=payload, timeout=10)
         log("LINE reply status:", res.status_code)
@@ -98,12 +102,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v6.1 lite generator is running."
+    return "AI Hashimoto Arata v8 keyword-only clean is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v6.1-lite-generator", "time": int(time.time())}
+    return {"ok": True, "version": "v8-keyword-only-clean", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
@@ -149,6 +153,12 @@ def callback():
                 continue
 
             answer = bot.reply(chat_id, user_text)
+
+            # Keyword-only mode: no trigger => intentionally no reply.
+            if answer is None:
+                log("ignored: no trigger")
+                continue
+
             log("reply:", answer)
 
             if reply_token:
@@ -158,9 +168,9 @@ def callback():
 
         except Exception as e:
             log("callback event error:", repr(e))
-            fallback = "難しいです。"
+            # Keyword-only modeでも、コードエラー時は最低限だけ返す
             if reply_token:
-                reply_line(reply_token, fallback, fallback_to_id=get_chat_id(event))
+                reply_line(reply_token, "難しいです。", fallback_to_id=get_chat_id(event))
 
     return "OK"
 

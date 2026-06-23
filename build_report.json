@@ -1,27 +1,17 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v7_trigger_episode_engine",
-  "triggers": 900,
-  "zip_purpose": "Trigger/episode forced retrieval for keywords and lore.",
+  "version": "AI_HASHIMOTO_ARATA_v8_keyword_only_clean",
+  "trigger_count": 3000,
+  "purpose": "Keyword-only trigger bot; anger detached; minimal structure.",
   "files": [
     "Procfile",
     "README.md",
     "app.py",
     "bot.py",
-    "build_report.json",
-    "data/emotion_profile.json",
-    "data/keywords.txt",
-    "data/messages.jsonl",
-    "data/pairs.jsonl",
-    "data/presence_profile.json",
-    "data/source_dataset_report.json",
-    "data/style_profile.json",
-    "data/trigger_index.json",
     "data/trigger_keywords.txt",
+    "data/triggers.json",
     "persona.md",
-    "profile.txt",
     "requirements.txt",
-    "retriever.py",
-    "store.py",
+    "trigger_engine.py",
     "utils.py"
   ]
 }
