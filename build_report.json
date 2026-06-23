@@ -1,0 +1,19 @@
+{
+  "version": "AI_HASHIMOTO_ARATA_v8_2_exhaustive_keywords_capyi_fallback",
+  "trigger_count": 10000,
+  "triggers_json_mb": 12.832056999206543,
+  "fallback": "ｷｬﾋﾟｨ",
+  "files": [
+    "Procfile",
+    "README.md",
+    "app.py",
+    "bot.py",
+    "build_report.json",
+    "data/trigger_keywords.txt",
+    "data/triggers.json",
+    "persona.md",
+    "requirements.txt",
+    "trigger_engine.py",
+    "utils.py"
+  ]
+}
