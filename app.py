@@ -102,12 +102,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v8 keyword-only clean is running."
+    return "AI Hashimoto Arata v9 keyword episode engine is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v8-keyword-only-clean", "time": int(time.time())}
+    return {"ok": True, "version": "v9-keyword-episode-engine", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
@@ -154,13 +154,11 @@ def callback():
 
             answer = bot.reply(chat_id, user_text)
 
-            # Keyword-only mode: no trigger => intentionally no reply.
             if answer is None:
-                log("ignored: no trigger")
+                log("ignored: no keyword")
                 continue
 
             log("reply:", answer)
-
             if reply_token:
                 reply_line(reply_token, answer, fallback_to_id=chat_id)
             else:
@@ -168,9 +166,8 @@ def callback():
 
         except Exception as e:
             log("callback event error:", repr(e))
-            # Keyword-only modeでも、コードエラー時は最低限だけ返す
             if reply_token:
-                reply_line(reply_token, "難しいです。", fallback_to_id=get_chat_id(event))
+                reply_line(reply_token, "ｷｬﾋﾟｨ", fallback_to_id=get_chat_id(event))
 
     return "OK"
 

@@ -33,7 +33,7 @@ def too_similar(user_text: str, reply: str) -> bool:
         return True
     if len(r) >= 4 and r in u:
         return True
-    return SequenceMatcher(None, u, r).ratio() >= 0.74 and len(r) <= len(u) + 20
+    return SequenceMatcher(None, u, r).ratio() >= 0.76 and len(r) <= len(u) + 20
 
 
 def remove_ai_phrases(reply: str) -> str:
@@ -54,9 +54,3 @@ def clean_reply(user_text: str, reply: str) -> str:
     if too_similar(user_text, reply):
         return ""
     return reply
-
-
-ANGER_TERMS = ["黙", "うるさ", "ふざけ", "キレ", "怒", "バカ", "馬鹿", "カス", "ゴミ", "クソ", "くそ", "消え", "殴", "嫌い", "帰れ"]
-
-def angerish(text: str) -> bool:
-    return any(t in (text or "") for t in ANGER_TERMS)

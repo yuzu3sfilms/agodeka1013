@@ -1,116 +1,106 @@
-# AI橋本新 v8.2 exhaustive keywords + ｷｬﾋﾟｨ fallback
+# AI橋本新 v9 keyword episode engine
 
-## 修正内容
+## 何を直したか
 
-### 1. キーワード網羅を大幅拡張
-
-v8/v8.1の3000 triggerでは足りなかったため、元LINEログ・Excel・既存triggerから再抽出し直した。
-
-対象:
-- 元LINEログ 108,530発言
-- Excelデータ
-- 既存trigger
-- 既存triggerの関連例
-- speaker名/固有名詞
-
-trigger数:
+今回の設計はこれ。
 
 ```text
-10000
+キーワードを拾う
+↓
+過去LINEログからそのキーワード周辺のエピソードを探す
+↓
+そのエピソードをGroqに渡す
+↓
+エピソードに基づいて返事する
 ```
 
-### 2. 固有名詞も広く投入
+v8までは「trigger→短い返答例」寄りだった。
+v9では「trigger→過去ログ会話窓」に変えた。
 
-抽出対象:
-- 人名/表示名
-- カタカナ語
-- 英数字語
-- 漢字語
-- 混合語
-- 語録断片
-- 話題語
-- speaker名
+## データ
 
-### 3. 手動重要語は必ず含めた
+### data/episodes.json
 
-例:
+キーワードごとに、実際のLINEログ周辺の会話窓を保存。
+
+形式:
 
 ```text
-橋本新
-橋本
-あらた
-あらくん
-顎
-AGODEKA
-LIAR
-ARAKUN
-Unknown
-牛角
-二郎
-野猿
-ボンジョヴィ
-Bon Jovi
-BON JOVI
-きゃぴ
-きゃぴい
-ｷｬﾋﾟｨ
-ぼくぅ
-かわいいでしょ
-フリーポーズ
-無理ゲー
-玩具
-ｷﾞｬｵ
-トーマス
-アナザーアラクン
-ムタ
-ムタソ
-どいくん
-塩田
+keyword
+  └ episodes
+      ├ 会話窓
+      └ 橋本新系アカウントの返答
 ```
 
-### 4. エラー時fallback
+### data/episode_keywords.txt
 
-Groq 429 / Groq例外 / 生成失敗時は、固定でこれを返す。
+エピソードが見つかったキーワード一覧。
+
+### data/all_keywords.txt
+
+検出用の全キーワード一覧。
+エピソードがないキーワードも含む。
+
+## 件数
 
 ```text
-ｷｬﾋﾟｨ
+元LINEログ: 108,530発言
+キーワード総数: 9,901
+エピソード付きキーワード: 7,897
 ```
 
-ログ:
+## ログ
+
+成功時:
+
+```text
+episode_check hits=['ムタ'] episode_counts=[4]
+generation path: groq_episode
+reply: ...
+```
+
+キーワードはあるがエピソードなし:
+
+```text
+episode_check hits=['ボンジョヴィ'] episode_counts=[0]
+generation path: keyword_no_episode_capyi
+reply: ｷｬﾋﾟｨ
+```
+
+キーワードなし:
+
+```text
+episode_check hits=[]
+generation path: no_keyword_ignore
+ignored: no keyword
+```
+
+Groqエラー/429:
 
 ```text
 generation path: groq_429_capyi
 reply: ｷｬﾋﾟｨ
 ```
 
-### 5. キーワードなしは無視
+## 怒りの切り離し
 
-```text
-trigger_check hits=[]
-generation path: no_trigger_ignore
-ignored: no trigger
-```
-
-### 6. ファイルサイズ
-
-`data/triggers.json` は約12.8MB。
-GitHubの25MB単体ファイル制限内。
-
-ZIPは約数MB台。
+エピソード抽出時に、怒り・罵倒っぽい行は材料から外している。
+人格として怒りを再現しない。
 
 ## ファイル構成
 
 ```text
 app.py
 bot.py
-trigger_engine.py
+episode_engine.py
 utils.py
 persona.md
 requirements.txt
 Procfile
 data/
-  triggers.json
-  trigger_keywords.txt
+  episodes.json
+  episode_keywords.txt
+  all_keywords.txt
 ```
 
 ## 必須環境変数
@@ -124,11 +114,16 @@ GROQ_API_KEY
 ## 任意環境変数
 
 ```text
-MAX_TRIGGER_HITS=6
-MAX_TRIGGER_EXAMPLES=3
-MAX_TOKENS=120
+MAX_EPISODE_HITS=4
+MAX_EPISODES_PER_TRIGGER=3
+MAX_TOKENS=140
 TEMPERATURE=0.95
 HISTORY_LEN=4
 RATE_LIMIT_COOLDOWN_SECONDS=900
 DEBUG_LOG=1
 ```
+
+## 導入
+
+GitHubを更地にして、このZIPの中身を全部アップロード。
+`data/episodes.json` が本体。
