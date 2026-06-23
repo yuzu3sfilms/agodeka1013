@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import os
+import time
 
 import requests
 from flask import Flask, request, abort
@@ -27,7 +28,7 @@ STOP_WORDS_N = [normalize(w) for w in STOP_WORDS]
 
 def log(*args):
     if DEBUG:
-        print(*args)
+        print(*args, flush=True)
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
@@ -50,29 +51,89 @@ def is_stop(text: str) -> bool:
     return any(w in nt for w in STOP_WORDS_N)
 
 
-def reply_line(reply_token: str, text: str):
-    url = "https://api.line.me/v2/bot/message/reply"
-    headers = {
+def line_headers():
+    return {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
     }
+
+
+def push_line(to_id: str, text: str) -> bool:
+    if not to_id or to_id == "unknown":
+        log("push skipped: no target id")
+        return False
+
+    url = "https://api.line.me/v2/bot/message/push"
+    payload = {
+        "to": to_id,
+        "messages": [{"type": "text", "text": text or "難しいです。"}],
+    }
+
+    try:
+        res = requests.post(url, headers=line_headers(), json=payload, timeout=10)
+        log("LINE push status:", res.status_code)
+        if res.status_code >= 300:
+            log("LINE push error:", res.status_code, res.text)
+        return 200 <= res.status_code < 300
+    except Exception as e:
+        log("LINE push exception:", repr(e))
+        return False
+
+
+def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -> bool:
+    url = "https://api.line.me/v2/bot/message/reply"
     payload = {
         "replyToken": reply_token,
         "messages": [{"type": "text", "text": text or "難しいです。"}],
     }
-    res = requests.post(url, headers=headers, json=payload, timeout=10)
-    log("LINE reply status:", res.status_code)
-    if res.status_code >= 300:
+
+    try:
+        res = requests.post(url, headers=line_headers(), json=payload, timeout=10)
+        log("LINE reply status:", res.status_code)
+
+        if 200 <= res.status_code < 300:
+            return True
+
         log("LINE reply error:", res.status_code, res.text)
+
+        # Cold start can make replyToken stale. Push fallback uses groupId/roomId/userId.
+        if fallback_to_id:
+            log("trying push fallback")
+            return push_line(fallback_to_id, text)
+
+        return False
+
+    except Exception as e:
+        log("LINE reply exception:", repr(e))
+        if fallback_to_id:
+            log("trying push fallback after exception")
+            return push_line(fallback_to_id, text)
+        return False
 
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v4 high fidelity is running."
+    return "AI Hashimoto Arata v5.3 cold-start push fallback is running."
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return {
+        "ok": True,
+        "version": "v5.3-cold-start-push-fallback",
+        "time": int(time.time()),
+    }
+
+
+@app.route("/callback", methods=["GET"])
+def callback_get():
+    return "callback endpoint is alive. LINE must use POST."
 
 
 @app.route("/callback", methods=["POST"])
 def callback():
+    log("callback POST hit")
+
     body = request.get_data()
     signature = request.headers.get("X-Line-Signature", "")
 
@@ -87,19 +148,28 @@ def callback():
         reply_token = event.get("replyToken")
 
         try:
+            log("event type:", event.get("type"))
+
             if event.get("type") != "message":
                 continue
 
             message = event.get("message", {})
+            log("message type:", message.get("type"))
+
             if message.get("type") != "text":
+                log("ignored non-text")
                 continue
 
             user_text = message.get("text", "")
             chat_id = get_chat_id(event)
 
             log("received:", user_text)
+            log("chat_id:", chat_id)
 
             if not reply_token:
+                log("missing reply_token; using push if possible")
+                answer = bot.reply(chat_id, user_text)
+                push_line(chat_id, answer)
                 continue
 
             if is_stop(user_text):
@@ -109,13 +179,13 @@ def callback():
 
             answer = bot.reply(chat_id, user_text)
             log("reply:", answer)
-            reply_line(reply_token, answer)
+            reply_line(reply_token, answer, fallback_to_id=chat_id)
 
         except Exception as e:
-            log("callback error:", repr(e))
+            log("callback event error:", repr(e))
             if reply_token:
                 try:
-                    reply_line(reply_token, "難しいです。")
+                    reply_line(reply_token, "難しいです。", fallback_to_id=get_chat_id(event))
                 except Exception as e2:
                     log("fallback reply failed:", repr(e2))
 
