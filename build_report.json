@@ -1,0 +1,27 @@
+{
+  "version": "AI_HASHIMOTO_ARATA_v5_presence_engine",
+  "purpose": "Bridge the absence of Hashimoto Arata with context, emotion, response-function, behavior-tags, and style statistics.",
+  "files": [
+    "Procfile",
+    "README.md",
+    "app.py",
+    "bot.py",
+    "build_report.json",
+    "data/emotion_profile.json",
+    "data/keywords.txt",
+    "data/messages.jsonl",
+    "data/pairs.jsonl",
+    "data/presence_profile.json",
+    "data/source_dataset_report.json",
+    "data/style_profile.json",
+    "profile.txt",
+    "requirements.txt",
+    "store.py",
+    "utils.py"
+  ],
+  "counts": {
+    "pairs": 5072,
+    "messages": 7950,
+    "keywords": 9393
+  }
+}
