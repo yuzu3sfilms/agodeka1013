@@ -1,4 +1,5 @@
 import json
+import os
 import random
 from pathlib import Path
 
@@ -42,41 +43,29 @@ def infer_response_function(user_text: str, user_emotion: str) -> str:
 
 
 class HashimotoStore:
+    """
+    Render-safe store.
+
+    v5は起動時に全データを読み込み、全件term indexを作ったため512MiBを超えた。
+    v5.1では起動時に巨大indexを作らず、必要時だけJSONLを軽くスキャンする。
+    """
+
     def __init__(self, data_dir: str = "data"):
         self.data_dir = Path(data_dir)
-        self.pairs = self._load_jsonl("pairs.jsonl")
-        self.messages = self._load_jsonl("messages.jsonl")
-        self.keywords = self._load_txt("keywords.txt")
+        self.pairs_path = self.data_dir / "pairs.jsonl"
+        self.messages_path = self.data_dir / "messages.jsonl"
+        self.keywords_path = self.data_dir / "keywords.txt"
         self.style_profile = self._load_json("style_profile.json", {})
         self.emotion_profile = self._load_json("emotion_profile.json", {})
         self.presence_profile = self._load_json("presence_profile.json", {})
 
-        self.keyword_norm = [normalize(k) for k in self.keywords[:10000] if len(normalize(k)) >= 2]
-        self.pair_index = []
-        self.message_index = []
-        self._build_index()
-        self.safe_replies = self._build_safe_replies()
+        self.max_pair_scan = int(os.environ.get("MAX_PAIR_SCAN", "1800"))
+        self.max_message_scan = int(os.environ.get("MAX_MESSAGE_SCAN", "1800"))
+        self.max_keywords = int(os.environ.get("MAX_KEYWORDS", "2500"))
 
-    def _load_jsonl(self, name: str) -> list[dict]:
-        path = self.data_dir / name
-        if not path.exists():
-            return []
-        rows = []
-        with path.open(encoding="utf-8") as f:
-            for line in f:
-                try:
-                    line = line.strip()
-                    if line:
-                        rows.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-        return rows
-
-    def _load_txt(self, name: str) -> list[str]:
-        path = self.data_dir / name
-        if not path.exists():
-            return []
-        return [x.strip() for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+        # Small only. Do not load huge data.
+        self.keywords = self._load_keywords_small()
+        self.safe_replies = self._load_safe_replies_small()
 
     def _load_json(self, name: str, default):
         path = self.data_dir / name
@@ -87,88 +76,104 @@ class HashimotoStore:
         except Exception:
             return default
 
+    def _load_keywords_small(self) -> list[str]:
+        if not self.keywords_path.exists():
+            return []
+        out = []
+        with self.keywords_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    n = normalize(line)
+                    if len(n) >= 2:
+                        out.append(n)
+                if len(out) >= self.max_keywords:
+                    break
+        return out
+
+    def _iter_jsonl(self, path: Path, limit: int):
+        if not path.exists():
+            return
+        with path.open(encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                if i >= limit:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+    def _load_safe_replies_small(self) -> list[str]:
+        replies = []
+        for p in self._iter_jsonl(self.pairs_path, 500):
+            r = (p.get("reply") or "").strip()
+            if 1 <= len(r) <= 80 and not too_harsh(r):
+                replies.append(r)
+        for m in self._iter_jsonl(self.messages_path, 500):
+            t = (m.get("text") or "").strip()
+            if 1 <= len(t) <= 80 and not too_harsh(t):
+                replies.append(t)
+
+        replies += ["難しいです。", "お願いします…。", "ちょっと分からないです。", "それは違います。", "これは良いです。"]
+
+        out, seen = [], set()
+        for r in replies:
+            if r not in seen:
+                out.append(r)
+                seen.add(r)
+        return out
+
     def _terms(self, text: str) -> set[str]:
         nt = normalize(text)
         terms = set()
 
-        for kw in self.keyword_norm:
+        for kw in self.keywords:
             if kw and kw in nt:
                 terms.add(kw)
 
-        for n in (10, 9, 8, 7, 6, 5, 4, 3, 2):
+        # Fewer ngrams than v5 to save CPU/memory.
+        for n in (8, 7, 6, 5, 4, 3):
             for i in range(max(0, len(nt) - n + 1)):
-                terms.add(nt[i:i+n])
+                g = nt[i:i+n]
+                if len(g) >= 3:
+                    terms.add(g)
 
-        return {t for t in terms if len(t) >= 2}
+        # hard cap
+        return set(sorted(terms, key=len, reverse=True)[:80])
 
-    def _build_index(self):
-        for p in self.pairs:
-            text = "\n".join([
-                p.get("context_text", ""),
-                p.get("last_other", ""),
-                p.get("reply", ""),
-                p.get("emotion", ""),
-                p.get("response_function", ""),
-                " ".join(p.get("behavior_tags", [])),
-            ])
-            self.pair_index.append((p, self._terms(text)))
-
-        for m in self.messages:
-            text = "\n".join([
-                m.get("text", ""),
-                m.get("emotion", ""),
-                m.get("response_function", ""),
-                " ".join(m.get("behavior_tags", [])),
-            ])
-            self.message_index.append((m, self._terms(text)))
-
-    def _build_safe_replies(self) -> list[str]:
-        candidates = []
-        for p in self.pairs:
-            r = (p.get("reply") or "").strip()
-            if 1 <= len(r) <= 90 and not too_harsh(r):
-                candidates.append(r)
-        for m in self.messages:
-            t = (m.get("text") or "").strip()
-            if 1 <= len(t) <= 90 and not too_harsh(t):
-                candidates.append(t)
-        candidates += ["難しいです。", "お願いします…。", "ちょっと分からないです。", "それは違います。", "これは良いです。"]
-
-        out, seen = [], set()
-        for c in candidates:
-            if c not in seen:
-                out.append(c)
-                seen.add(c)
-        return out
-
-    def _base_score(self, query_terms: set[str], cand_terms: set[str], cand_text: str) -> int:
-        overlap = query_terms & cand_terms
+    def _base_score(self, query_terms: set[str], candidate_text: str) -> int:
+        nc = normalize(candidate_text)
         score = 0
-        for t in overlap:
-            l = len(t)
-            if l >= 7:
-                score += 80 + l
-            elif l >= 5:
-                score += 45 + l
-            elif l >= 3:
-                score += 16 + l
-            else:
-                score += 4
+        has_long = False
 
-        if not any(len(t) >= 4 for t in overlap):
-            score = int(score * 0.35)
+        for t in query_terms:
+            if t in nc:
+                l = len(t)
+                if l >= 7:
+                    score += 80 + l
+                    has_long = True
+                elif l >= 5:
+                    score += 45 + l
+                    has_long = True
+                elif l >= 3:
+                    score += 16 + l
 
-        # presence profile: most replies are short
-        if len(cand_text) <= 30:
+        if not has_long:
+            score = int(score * 0.4)
+
+        if len(candidate_text) <= 30:
             score += 12
-        elif len(cand_text) > 90:
+        elif len(candidate_text) > 90:
             score -= 25
 
         return score
 
     def _emotion_bonus(self, item: dict, target_emotion: str, user_emotion: str) -> int:
         emotion = item.get("emotion", "neutral")
-        intensity = int(item.get("intensity", 1))
+        intensity = int(item.get("intensity", 1) or 1)
 
         if emotion == target_emotion:
             return 42 + 6 * intensity
@@ -228,15 +233,24 @@ class HashimotoStore:
         target_function = infer_response_function(last, user_emotion)
 
         pair_hits = []
-        for p, terms in self.pair_index:
+        for p in self._iter_jsonl(self.pairs_path, self.max_pair_scan):
             reply = p.get("reply", "")
-            score = 24 + self._base_score(query_terms, terms, reply)
+            if not reply:
+                continue
+
+            candidate = "\n".join([
+                p.get("context_text", ""),
+                p.get("last_other", ""),
+                reply,
+                p.get("emotion", ""),
+                p.get("response_function", ""),
+                " ".join(p.get("behavior_tags", [])),
+            ])
+
+            score = 24 + self._base_score(query_terms, candidate)
+            score += self._base_score(query_terms, p.get("last_other", ""))
             score += self._emotion_bonus(p, target_emotion, user_emotion)
             score += self._function_bonus(p, target_function)
-
-            last_other = p.get("last_other", "")
-            if last_other:
-                score += self._base_score(query_terms, self._terms(last_other), reply)
 
             if too_harsh(reply):
                 score -= 100
@@ -247,13 +261,25 @@ class HashimotoStore:
         pair_hits.sort(key=lambda x: x[0], reverse=True)
 
         msg_hits = []
-        for m, terms in self.message_index:
+        for m in self._iter_jsonl(self.messages_path, self.max_message_scan):
             text = m.get("text", "")
-            score = self._base_score(query_terms, terms, text)
+            if not text:
+                continue
+
+            candidate = "\n".join([
+                text,
+                m.get("emotion", ""),
+                m.get("response_function", ""),
+                " ".join(m.get("behavior_tags", [])),
+            ])
+
+            score = self._base_score(query_terms, candidate)
             score += self._emotion_bonus(m, target_emotion, user_emotion)
             score += self._function_bonus(m, target_function)
+
             if too_harsh(text):
                 score -= 100
+
             if score > 25:
                 msg_hits.append((score, m))
 
