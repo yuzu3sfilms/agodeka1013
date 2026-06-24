@@ -1,70 +1,59 @@
-# AI橋本新 v9 keyword episode engine
+# AI橋本新 v9.1 reaction boost
 
-## 何を直したか
+## 修正理由
 
-今回の設計はこれ。
+v9は「キーワード→エピソード→返答生成」の構造にはなったが、反応が鈍い/悪い可能性が残っていた。
 
-```text
-キーワードを拾う
-↓
-過去LINEログからそのキーワード周辺のエピソードを探す
-↓
-そのエピソードをGroqに渡す
-↓
-エピソードに基づいて返事する
-```
+主な原因:
+- 短い部分語・汎用triggerが混ざる
+- 長いキーワードより部分語が勝つ
+- context由来triggerがユーザー発言の明示triggerを邪魔する
+- エピソードなしkeywordで即ｷｬﾋﾟｨになりやすい
 
-v8までは「trigger→短い返答例」寄りだった。
-v9では「trigger→過去ログ会話窓」に変えた。
+## v9.1の修正
 
-## データ
+### 1. 明示trigger優先
 
-### data/episodes.json
+ユーザー発言に含まれるtriggerを最優先。
+context由来triggerは、明示triggerがない時だけ使う。
 
-キーワードごとに、実際のLINEログ周辺の会話窓を保存。
+### 2. 長いキーワード優先
 
-形式:
+`シンギュラリティ` のような長い語がある場合、短い部分語を抑える。
 
-```text
-keyword
-  └ episodes
-      ├ 会話窓
-      └ 橋本新系アカウントの返答
-```
+### 3. 内包短語を削除
 
-### data/episode_keywords.txt
+長いhitに含まれる短いhitは基本的に削除。
+ただし `顎` などのidentity triggerは明示されていれば残す。
 
-エピソードが見つかったキーワード一覧。
+### 4. episode補完
 
-### data/all_keywords.txt
+キーワード自体にエピソードがない場合でも、
+内包/被内包するepisode付きkeywordを探して補完する。
 
-検出用の全キーワード一覧。
-エピソードがないキーワードも含む。
+### 5. エピソード使用を強制
 
-## 件数
+プロンプトで、
 
 ```text
-元LINEログ: 108,530発言
-キーワード総数: 9,901
-エピソード付きキーワード: 7,897
+エピソード内の単語や出来事を最低1つは反応に混ぜる
 ```
+
+を追加。
 
 ## ログ
 
 成功時:
 
 ```text
-episode_check hits=['ムタ'] episode_counts=[4]
+episode_check hits=['ムタ'] episode_counts=[3]
 generation path: groq_episode
-reply: ...
 ```
 
-キーワードはあるがエピソードなし:
+キーワードあり・エピソード補完あり:
 
 ```text
-episode_check hits=['ボンジョヴィ'] episode_counts=[0]
-generation path: keyword_no_episode_capyi
-reply: ｷｬﾋﾟｨ
+episode_check hits=['ムタソ→ムタ'] episode_counts=[3]
 ```
 
 キーワードなし:
@@ -72,20 +61,7 @@ reply: ｷｬﾋﾟｨ
 ```text
 episode_check hits=[]
 generation path: no_keyword_ignore
-ignored: no keyword
 ```
-
-Groqエラー/429:
-
-```text
-generation path: groq_429_capyi
-reply: ｷｬﾋﾟｨ
-```
-
-## 怒りの切り離し
-
-エピソード抽出時に、怒り・罵倒っぽい行は材料から外している。
-人格として怒りを再現しない。
 
 ## ファイル構成
 
@@ -102,28 +78,3 @@ data/
   episode_keywords.txt
   all_keywords.txt
 ```
-
-## 必須環境変数
-
-```text
-LINE_CHANNEL_SECRET
-LINE_CHANNEL_ACCESS_TOKEN
-GROQ_API_KEY
-```
-
-## 任意環境変数
-
-```text
-MAX_EPISODE_HITS=4
-MAX_EPISODES_PER_TRIGGER=3
-MAX_TOKENS=140
-TEMPERATURE=0.95
-HISTORY_LEN=4
-RATE_LIMIT_COOLDOWN_SECONDS=900
-DEBUG_LOG=1
-```
-
-## 導入
-
-GitHubを更地にして、このZIPの中身を全部アップロード。
-`data/episodes.json` が本体。

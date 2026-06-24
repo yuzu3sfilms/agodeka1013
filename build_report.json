@@ -1,15 +1,16 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v9_keyword_episode_engine",
+  "version": "AI_HASHIMOTO_ARATA_v9_1_reaction_boost",
+  "architecture": "keyword -> prioritized episode retrieval -> Groq reply",
   "all_keywords": 9901,
   "episode_keywords": 7897,
   "episodes_json_mb": 8.569000244140625,
   "fallback": "ｷｬﾋﾟｨ",
-  "architecture": "keyword -> episode search -> Groq reply based on episode",
   "files": [
     "Procfile",
     "README.md",
     "app.py",
     "bot.py",
+    "build_report.json",
     "data/all_keywords.txt",
     "data/episode_keywords.txt",
     "data/episodes.json",

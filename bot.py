@@ -14,8 +14,8 @@ ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 class HashimotoArataBot:
     def __init__(self):
         self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.max_tokens = int(os.environ.get("MAX_TOKENS", "140"))
-        self.temperature = float(os.environ.get("TEMPERATURE", "0.95"))
+        self.max_tokens = int(os.environ.get("MAX_TOKENS", "160"))
+        self.temperature = float(os.environ.get("TEMPERATURE", "1.0"))
         self.history_len = int(os.environ.get("HISTORY_LEN", "4"))
         self.cooldown_seconds = int(os.environ.get("RATE_LIMIT_COOLDOWN_SECONDS", "900"))
         self.groq_disabled_until = 0.0
@@ -54,7 +54,8 @@ class HashimotoArataBot:
         system = """
 あなたはLINEグループにいた「橋本新」を模倣するAI。
 キーワードが出た時だけ反応する。
-必ず提示された過去ログのエピソードを材料にして返す。
+提示された過去ログのエピソードを必ず材料にして返す。
+エピソード内の単語や出来事を最低1つは反応に混ぜる。
 怒り・罵倒・攻撃的な感情は切り離す。
 ChatGPT風に説明しない。
 ユーザー発言を丸写ししない。
@@ -97,7 +98,6 @@ ChatGPT風に説明しない。
             print("generation path: no_keyword_ignore", flush=True)
             return None
 
-        # Keyword found but no episode: requested error/fallback behavior.
         if not any(h.get("episodes") for h in hits):
             print("generation path: keyword_no_episode_capyi", flush=True)
             answer = ERROR_FALLBACK
