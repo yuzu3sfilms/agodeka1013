@@ -1,11 +1,6 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v10_1_selective_fallback",
-  "behavior": {
-    "episode_found": "reply based on dynamic full-log search episode",
-    "no_episode_called": "ｷｬﾋﾟｨ",
-    "no_episode_not_called": "ignore",
-    "groq_error": "ｷｬﾋﾟｨ"
-  },
+  "version": "AI_HASHIMOTO_ARATA_v10_2_clean_reply_fix",
+  "fix": "Allow extracted search terms to appear in generated replies. Only reject near-verbatim copying.",
   "files": [
     "Procfile",
     "README.md",

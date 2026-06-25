@@ -23,17 +23,34 @@ def strip_call_names(text: str) -> str:
 
 
 def too_similar(user_text: str, reply: str) -> bool:
+    """
+    v10.2:
+    以前は user_text が reply に含まれるだけで弾いていた。
+    しかし「コテンパン」「ポッさん」などの検索語を返答内で拾うのは正しい挙動。
+    ここでは「ほぼ丸写し」だけを弾く。
+    """
     u = strip_call_names(user_text)
     r = strip_call_names(reply)
     if not u or not r:
         return False
+
+    # 完全一致は弾く。
     if u == r:
         return True
-    if len(u) >= 4 and u in r:
+
+    # 返答がユーザー語だけ + ほぼ装飾なしなら弾く。
+    # 例: user=コテンパン, reply=コテンパン
+    if len(r) <= len(u) + 2 and (u in r or r in u):
         return True
-    if len(r) >= 4 and r in u:
-        return True
-    return SequenceMatcher(None, u, r).ratio() >= 0.76 and len(r) <= len(u) + 20
+
+    # 長文同士の高類似のみ弾く。
+    # 短い検索語が含まれるだけでは弾かない。
+    if len(u) >= 8 and len(r) >= 8:
+        ratio = SequenceMatcher(None, u, r).ratio()
+        if ratio >= 0.86 and len(r) <= len(u) + 20:
+            return True
+
+    return False
 
 
 def remove_ai_phrases(reply: str) -> str:
