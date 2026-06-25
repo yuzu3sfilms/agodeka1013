@@ -10,14 +10,18 @@ from utils import normalize, angerish
 PERSONA_SPEAKERS = {"LIAR  OF  ARAKUN", "Unknown", "橋本新", "Arata Hashimoto"}
 CRITICAL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "牛角", "二郎", "野猿", "ムタ", "ムタソ", "きゃぴ", "ｷｬﾋﾟｨ", "ぼくぅ"]
 
+BAD_QUERY_CHUNKS = {
+    "お前", "早く", "来い", "遅れる", "何に", "使うの", "作ってるの",
+    "あるの", "いるの", "なの", "です", "ます", "した", "して", "から", "ので",
+}
+
 
 class DynamicSearch:
     """
-    v10:
-    No fixed trigger list as the main mechanism.
-
-    Runtime process:
-    user text -> extract terms -> full corpus search -> episode windows -> Groq
+    v10.3:
+    - 雑な全n-gram検索を廃止
+    - 固有名詞/カタカナ/英数字/漢字語/critical term中心に検索
+    - 文章全体の断片で無理やりヒットさせない
     """
 
     def __init__(self, data_dir: str = "data"):
@@ -27,9 +31,10 @@ class DynamicSearch:
         self.max_windows = int(os.environ.get("MAX_EPISODE_WINDOWS", "4"))
         self.window_before = int(os.environ.get("EPISODE_WINDOW_BEFORE", "4"))
         self.window_after = int(os.environ.get("EPISODE_WINDOW_AFTER", "6"))
-        self.min_score = int(os.environ.get("MIN_SEARCH_SCORE", "35"))
+        self.min_score = int(os.environ.get("MIN_SEARCH_SCORE", "55"))
 
         self.messages = []
+        self.persona_style_lines = []
         self._load_corpus()
 
     def _load_corpus(self):
@@ -38,7 +43,12 @@ class DynamicSearch:
         with gzip.open(self.corpus_path, "rt", encoding="utf-8") as f:
             for line in f:
                 try:
-                    self.messages.append(json.loads(line))
+                    m = json.loads(line)
+                    self.messages.append(m)
+                    if m.get("p") and m.get("x") and not angerish(m.get("x", "")):
+                        tx = m["x"].strip()
+                        if 2 <= len(tx) <= 80:
+                            self.persona_style_lines.append(tx)
                 except Exception:
                     continue
 
@@ -51,13 +61,11 @@ class DynamicSearch:
             if normalize(t) in nt:
                 terms.add(t)
 
-        # Extract visible chunks dynamically.
+        # Proper-ish chunks only. No arbitrary sentence ngrams.
         patterns = [
             r"[A-Za-z][A-Za-z0-9_\-]{2,}",
             r"[ァ-ヴｦ-ﾟー]{2,}",
             r"[一-龥々〆ヵヶ]{2,}",
-            r"[ぁ-んー]{3,}",
-            r"[A-Za-z0-9一-龥々〆ヵヶァ-ヴｦ-ﾟぁ-んー]{3,}",
         ]
         for pat in patterns:
             for tok in re.findall(pat, raw):
@@ -65,44 +73,43 @@ class DynamicSearch:
                 if self._good_term(tok):
                     terms.add(tok)
 
-        # Add Japanese character ngrams from normalized text as fallback.
-        # This catches unknown proper nouns not in dictionaries.
-        for n in (8, 7, 6, 5, 4, 3, 2):
-            if len(nt) < n:
-                continue
-            for i in range(0, len(nt) - n + 1):
-                g = nt[i:i+n]
-                if self._good_norm_term(g):
-                    terms.add(g)
+        # Mixed chunks, but reject sentence-like Japanese.
+        for tok in re.findall(r"[A-Za-z0-9一-龥々〆ヵヶァ-ヴｦ-ﾟぁ-んー]{3,}", raw):
+            tok = tok.strip()
+            if self._good_mixed_term(tok):
+                terms.add(tok)
 
-        # Prefer longer terms; cap to prevent noisy huge prompts.
+        # Short known/quoted-looking katakana/person terms are important.
         terms = sorted(terms, key=lambda x: (len(normalize(x)), x), reverse=True)
-        return terms[:30]
+        return terms[:14]
 
     def _good_term(self, term: str):
-        return self._good_norm_term(normalize(term))
-
-    def _good_norm_term(self, nt: str):
-        if not nt:
-            return False
-        stop = {
-            "です", "ます", "した", "して", "ない", "ある", "いる", "する", "なる",
-            "これ", "それ", "あれ", "ここ", "そこ", "さん", "くん", "ちゃん",
-            "今日", "明日", "昨日", "時間", "研究", "line", "http", "https", "www", "com",
-            "の研究", "したい", "いの", "たいの",
-        }
-        if nt in stop:
+        nt = normalize(term)
+        if not nt or nt in BAD_QUERY_CHUNKS:
             return False
         if len(nt) <= 1:
             return False
-        if len(nt) <= 2 and nt not in {normalize(x) for x in CRITICAL_TERMS}:
-            # avoid fragments like ティ
-            if re.fullmatch(r"[ぁ-んァ-ヴーｦ-ﾟ]+", nt):
-                return False
-            if re.fullmatch(r"[a-z0-9]+", nt):
-                return False
         if re.fullmatch(r"\d+", nt):
             return False
+        return True
+
+    def _good_mixed_term(self, term: str):
+        nt = normalize(term)
+        if not self._good_term(term):
+            return False
+
+        # Reject long sentence-like chunks with particles/auxiliary unless they include katakana/latin/critical term.
+        has_katakana_or_latin = bool(re.search(r"[A-Za-zァ-ヴｦ-ﾟ]", term))
+        has_critical = any(normalize(t) in nt for t in CRITICAL_TERMS)
+
+        if len(nt) >= 7 and not has_katakana_or_latin and not has_critical:
+            return False
+
+        # Reject chunks that look like whole questions/instructions rather than searchable nouns.
+        if re.search(r"(から|ので|なら|して|した|れる|られる|たい|来い|何に|使う|作って|遅れる)", term):
+            if not has_katakana_or_latin and not has_critical:
+                return False
+
         return True
 
     def search(self, user_text: str):
@@ -111,7 +118,7 @@ class DynamicSearch:
 
         hits = []
         if not norm_terms:
-            return {"terms": [], "hits": [], "episodes": []}
+            return {"terms": [], "hits": [], "episodes": [], "style": self.sample_style([])}
 
         for i, m in enumerate(self.messages):
             ntext = m.get("n", "")
@@ -123,23 +130,22 @@ class DynamicSearch:
             for orig, nt in norm_terms:
                 if nt in ntext:
                     l = len(nt)
-                    score += l * l + 10
+                    score += l * l + 20
                     matched.append(orig)
 
             if score <= 0:
                 continue
 
-            # Prefer hits involving persona speakers or followed by persona.
             if m.get("p"):
                 score += 500
             if i + 1 < len(self.messages) and self.messages[i + 1].get("p"):
-                score += 400
+                score += 450
             if i + 2 < len(self.messages) and self.messages[i + 2].get("p"):
-                score += 200
+                score += 250
 
-            # Prefer longer exact user chunks.
-            if normalize(user_text) in ntext:
-                score += 300
+            # Penalize hits that do not include a strong explicit term.
+            if not any(len(normalize(x)) >= 3 for x in matched):
+                score -= 80
 
             if score >= self.min_score:
                 hits.append({"i": i, "score": score, "matched": matched[:8], "speaker": m.get("s"), "text": m.get("x")})
@@ -161,7 +167,26 @@ class DynamicSearch:
             if len(episodes) >= self.max_windows:
                 break
 
-        return {"terms": terms, "hits": hits, "episodes": episodes}
+        style = self.sample_style(episodes)
+        return {"terms": terms, "hits": hits, "episodes": episodes, "style": style}
+
+    def sample_style(self, episodes):
+        # Prefer persona lines from retrieved episodes.
+        lines = []
+        for ep in episodes or []:
+            for x in ep.get("persona_lines", []):
+                if x and x not in lines:
+                    lines.append(x)
+                if len(lines) >= 10:
+                    return lines
+
+        # Fallback: stable style examples from corpus.
+        for x in self.persona_style_lines[:400]:
+            if x and x not in lines:
+                lines.append(x)
+            if len(lines) >= 10:
+                break
+        return lines
 
     def _window(self, idx: int, hit: dict):
         start = max(0, idx - self.window_before)
@@ -180,8 +205,8 @@ class DynamicSearch:
             if len(line) > 150:
                 line = line[:150] + "…"
             lines.append(line)
-            if sp in PERSONA_SPEAKERS:
-                persona_lines.append(tx[:130])
+            if sp in PERSONA_SPEAKERS and 2 <= len(tx.strip()) <= 100:
+                persona_lines.append(tx.strip())
 
         if not lines:
             return None
@@ -193,6 +218,7 @@ class DynamicSearch:
             "matched": hit["matched"],
             "window": "\n".join(lines)[-1000:],
             "persona": " / ".join(persona_lines[:4])[:300],
+            "persona_lines": persona_lines[:8],
         }
 
     def format_episodes(self, result: dict):
@@ -209,3 +235,7 @@ class DynamicSearch:
                 f"橋本新系発言:{ep.get('persona','') or 'なし'}"
             )
         return "\n\n---\n\n".join(blocks)
+
+    def format_style(self, result: dict):
+        lines = result.get("style", [])[:10]
+        return "\n".join(f"- {x}" for x in lines) if lines else "なし"

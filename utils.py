@@ -1,3 +1,4 @@
+import re
 import unicodedata
 from difflib import SequenceMatcher
 
@@ -23,33 +24,18 @@ def strip_call_names(text: str) -> str:
 
 
 def too_similar(user_text: str, reply: str) -> bool:
-    """
-    v10.2:
-    以前は user_text が reply に含まれるだけで弾いていた。
-    しかし「コテンパン」「ポッさん」などの検索語を返答内で拾うのは正しい挙動。
-    ここでは「ほぼ丸写し」だけを弾く。
-    """
     u = strip_call_names(user_text)
     r = strip_call_names(reply)
     if not u or not r:
         return False
-
-    # 完全一致は弾く。
     if u == r:
         return True
-
-    # 返答がユーザー語だけ + ほぼ装飾なしなら弾く。
-    # 例: user=コテンパン, reply=コテンパン
     if len(r) <= len(u) + 2 and (u in r or r in u):
         return True
-
-    # 長文同士の高類似のみ弾く。
-    # 短い検索語が含まれるだけでは弾かない。
     if len(u) >= 8 and len(r) >= 8:
         ratio = SequenceMatcher(None, u, r).ratio()
         if ratio >= 0.86 and len(r) <= len(u) + 20:
             return True
-
     return False
 
 
@@ -62,6 +48,40 @@ def remove_ai_phrases(reply: str) -> str:
     for b in banned:
         reply = reply.replace(b, "")
     return reply.strip()
+
+
+def de_ai_tone(reply: str) -> str:
+    """
+    生成後に最低限AIっぽい丁寧語/説明語を落とす。
+    過剰変換しすぎない。
+    """
+    r = reply or ""
+    r = remove_ai_phrases(r)
+
+    # Common AI-ish endings.
+    r = r.replace("だよね", "だわ")
+    r = r.replace("なんだよね", "なんだわ")
+    r = r.replace("ですよね", "だわ")
+    r = r.replace("ですね", "")
+    r = r.replace("ます！", "るわ")
+    r = r.replace("ます。", "るわ")
+    r = r.replace("ます", "る")
+    r = r.replace("です！", "だわ")
+    r = r.replace("です。", "だわ")
+    r = r.replace("です", "だわ")
+
+    # Avoid safety-advice-ish phrase.
+    r = r.replace("気を付けて使うよ", "使うやつ")
+    r = r.replace("気を付けて", "")
+
+    # Trim overly explanatory connective endings.
+    r = re.sub(r"。.*(ということ|という感じ|というわけ).*", "。", r)
+
+    # Too much punctuation.
+    r = r.replace("！！", "!")
+    r = r.replace("！", "")
+    r = r.strip()
+    return r
 
 
 def clean_reply(user_text: str, reply: str) -> str:

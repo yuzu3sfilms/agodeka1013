@@ -1,6 +1,12 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v10_2_clean_reply_fix",
-  "fix": "Allow extracted search terms to appear in generated replies. Only reject near-verbatim copying.",
+  "version": "AI_HASHIMOTO_ARATA_v10_3_style_and_search_fix",
+  "fixes": [
+    "Removed arbitrary sentence n-gram search",
+    "Use proper-noun-like dynamic query extraction",
+    "Add persona style samples from retrieved episodes",
+    "Strengthen no-AI-explanation prompt",
+    "Postprocess AI-like endings"
+  ],
   "files": [
     "Procfile",
     "README.md",

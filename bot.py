@@ -5,7 +5,7 @@ from collections import defaultdict, deque
 from openai import OpenAI
 
 from dynamic_search import DynamicSearch
-from utils import clean_reply, normalize
+from utils import clean_reply, normalize, de_ai_tone
 
 
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
@@ -15,8 +15,8 @@ CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた
 class HashimotoArataBot:
     def __init__(self):
         self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.max_tokens = int(os.environ.get("MAX_TOKENS", "160"))
-        self.temperature = float(os.environ.get("TEMPERATURE", "0.95"))
+        self.max_tokens = int(os.environ.get("MAX_TOKENS", "120"))
+        self.temperature = float(os.environ.get("TEMPERATURE", "1.05"))
         self.history_len = int(os.environ.get("HISTORY_LEN", "4"))
         self.cooldown_seconds = int(os.environ.get("RATE_LIMIT_COOLDOWN_SECONDS", "900"))
         self.groq_disabled_until = 0.0
@@ -52,18 +52,29 @@ class HashimotoArataBot:
 
     def build_prompt(self, user_text: str, context: str, search_result: dict, chat_id: str):
         episode_block = self.searcher.format_episodes(search_result)
-        terms = ", ".join(search_result.get("terms", [])[:20])
+        style_block = self.searcher.format_style(search_result)
+        terms = ", ".join(search_result.get("terms", [])[:14])
         recent = "\n".join(context.splitlines()[-self.history_len:])
         recent_bot = "\n".join(self.last_bot_replies[chat_id]) or "なし"
 
         system = """
 あなたはLINEグループにいた「橋本新」を模倣するAI。
-発言から抽出された検索語と、過去LINEログ全文検索で見つかったエピソードを材料に返答する。
-過去ログエピソード内の出来事・語・温度感を最低1つ拾う。
-怒り・罵倒・攻撃的な感情は切り離す。
-ChatGPT風に説明しない。
-ユーザー発言を丸写ししない。
-返答はLINEっぽく1〜2文。
+過去LINEログ全文検索で見つかったエピソードを材料に返答する。
+ただし、説明AIになってはいけない。
+
+禁止:
+- 丁寧な解説
+- 「〜だよね」「〜なんだよね」「〜します」「〜ます！」「気を付けて」
+- 一般知識の説明
+- ChatGPT風のまとめ
+- ユーザー発言のオウム返し
+- 怒り・罵倒・攻撃
+
+やること:
+- エピソード内の出来事・語を1つ拾う
+- 下の「口調サンプル」の温度感・短さ・雑さに寄せる
+- 返答は1文、長くても2文
+- 句点や感嘆符を使いすぎない
 """.strip()
 
         user = f"""
@@ -82,7 +93,10 @@ ChatGPT風に説明しない。
 過去ログ全文検索でヒットした発言・エピソード:
 {episode_block}
 
-上のヒット/エピソードを踏まえて、橋本新として自然に返答。
+口調サンプル:
+{style_block}
+
+橋本新として返答。説明ではなく、LINEの会話として返す。
 """.strip()
         return system, user
 
@@ -130,6 +144,8 @@ ChatGPT風に説明しない。
             )
             raw = res.choices[0].message.content or ""
             print("groq_raw:", raw, flush=True)
+
+            raw = de_ai_tone(raw)
             answer = clean_reply(user_text, raw)
 
             if not answer or answer in set(self.last_bot_replies[chat_id]):
