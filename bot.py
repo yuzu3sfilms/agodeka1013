@@ -62,6 +62,7 @@ class HashimotoArataBot:
         relation_block = self.relationships.format()
         relation_style = "\n".join(f"- {x}" for x in self.relationships.style_samples(18))
         terms = ", ".join(search_result.get("terms", [])[:14])
+        predicates = ", ".join(search_result.get("predicates", [])[:16])
         recent = "\n".join(context.splitlines()[-self.history_len:])
         recent_bot = "\n".join(self.last_bot_replies[chat_id]) or "なし"
         question = self.is_question(user_text)
@@ -92,6 +93,9 @@ class HashimotoArataBot:
 
 抽出検索語:
 {terms}
+
+述語・活用展開検索語:
+{predicates}
 
 直近会話:
 {recent}
@@ -127,6 +131,7 @@ class HashimotoArataBot:
         print(
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
+            f"predicates={result.get('predicates', [])[:12]}",
             f"hits={len(result.get('hits', []))}",
             f"episodes={len(result.get('episodes', []))}",
             f"called={called}",

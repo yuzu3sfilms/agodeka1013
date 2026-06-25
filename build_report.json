@@ -1,12 +1,12 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v11_relationship_qa_engine",
+  "version": "AI_HASHIMOTO_ARATA_v11_1_predicate_fuzzy_search",
   "fixes": [
-    "Add relationship profile from group logs",
-    "Add question detection and QA-first prompt",
-    "Pass relationship map into generation",
-    "Pass global and episode-local style samples"
+    "Add predicate extraction",
+    "Add predicate variant expansion",
+    "Log predicates separately",
+    "Search predicates with lower but meaningful weight",
+    "Keep arbitrary full-sentence ngram search disabled"
   ],
-  "relationship_profile_mb": 0.010945320129394531,
   "files": [
     "Procfile",
     "README.md",
