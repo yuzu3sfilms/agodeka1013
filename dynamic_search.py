@@ -61,10 +61,10 @@ class DynamicSearch:
     def __init__(self, data_dir: str = "data"):
         self.data_dir = Path(data_dir)
         self.corpus_path = self.data_dir / "line_corpus.jsonl.gz"
-        self.max_hits = int(os.environ.get("MAX_SEARCH_HITS", "8"))
-        self.max_windows = int(os.environ.get("MAX_EPISODE_WINDOWS", "4"))
-        self.window_before = int(os.environ.get("EPISODE_WINDOW_BEFORE", "4"))
-        self.window_after = int(os.environ.get("EPISODE_WINDOW_AFTER", "6"))
+        self.max_hits = int(os.environ.get("MAX_SEARCH_HITS", "4"))
+        self.max_windows = int(os.environ.get("MAX_EPISODE_WINDOWS", "2"))
+        self.window_before = int(os.environ.get("EPISODE_WINDOW_BEFORE", "2"))
+        self.window_after = int(os.environ.get("EPISODE_WINDOW_AFTER", "3"))
         self.min_score = int(os.environ.get("MIN_SEARCH_SCORE", "45"))
 
         self.messages = []
@@ -282,8 +282,8 @@ class DynamicSearch:
             sp = m.get("s", "")
             role = "橋本新" if sp in PERSONA_SPEAKERS else sp
             line = f"{role}: {tx}"
-            if len(line) > 150:
-                line = line[:150] + "…"
+            if len(line) > 90:
+                line = line[:90] + "…"
             lines.append(line)
             if sp in PERSONA_SPEAKERS and 2 <= len(tx.strip()) <= 100:
                 persona_lines.append(tx.strip())
@@ -296,9 +296,9 @@ class DynamicSearch:
             "end": end,
             "score": hit["score"],
             "matched": hit["matched"],
-            "window": "\n".join(lines)[-1000:],
-            "persona": " / ".join(persona_lines[:4])[:300],
-            "persona_lines": persona_lines[:8],
+            "window": "\n".join(lines)[-480:],
+            "persona": " / ".join(persona_lines[:2])[:140],
+            "persona_lines": persona_lines[:4],
         }
 
     def format_episodes(self, result: dict):
@@ -309,10 +309,9 @@ class DynamicSearch:
         blocks = []
         for ep in episodes:
             blocks.append(
-                f"matched:{', '.join(ep.get('matched', []))}\n"
-                f"score:{ep.get('score')}\n"
-                f"会話窓:\n{ep.get('window','')}\n"
-                f"橋本新系発言:{ep.get('persona','') or 'なし'}"
+                f"hit:{', '.join(ep.get('matched', [])[:5])}\n"
+                f"{ep.get('window','')}\n"
+                f"橋本新:{ep.get('persona','') or 'なし'}"
             )
         return "\n\n---\n\n".join(blocks)
 

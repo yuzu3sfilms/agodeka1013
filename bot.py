@@ -17,7 +17,7 @@ CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた
 class HashimotoArataBot:
     def __init__(self):
         self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.max_tokens = int(os.environ.get("MAX_TOKENS", "140"))
+        self.max_tokens = int(os.environ.get("MAX_TOKENS", "90"))
         self.temperature = float(os.environ.get("TEMPERATURE", "1.0"))
         self.history_len = int(os.environ.get("HISTORY_LEN", "4"))
         self.cooldown_seconds = int(os.environ.get("RATE_LIMIT_COOLDOWN_SECONDS", "900"))
@@ -60,66 +60,37 @@ class HashimotoArataBot:
         episode_block = self.searcher.format_episodes(search_result)
         style_from_episode = self.searcher.format_style(search_result)
         relation_block = self.relationships.format()
-        relation_style = "\n".join(f"- {x}" for x in self.relationships.style_samples(18))
-        terms = ", ".join(search_result.get("terms", [])[:14])
-        predicates = ", ".join(search_result.get("predicates", [])[:16])
-        recent = "\n".join(context.splitlines()[-self.history_len:])
-        recent_bot = "\n".join(self.last_bot_replies[chat_id]) or "なし"
+        relation_style = "\n".join(f"- {x}" for x in self.relationships.style_samples(6))
+        terms = ", ".join(search_result.get("terms", [])[:8])
+        predicates = ", ".join(search_result.get("predicates", [])[:8])
+        recent = "\n".join(context.splitlines()[-2:])
         question = self.is_question(user_text)
 
-        mode = "質問応答モード" if question else "通常反応モード"
+        system = (
+            "橋本新としてLINEで返す。説明AI禁止。"
+            "質問ならまず短く答える。"
+            "過去ログ/人物関係/口調を材料にする。"
+            "怒り・罵倒なし。1文、長くても2文。"
+            "「だよね」「なんだよね」「ます」「気を付けて」禁止。"
+        )
 
-        system = """
-あなたはLINEグループにいた「橋本新」を模倣するAI。
-単なる検索要約ではなく、グループ内の人間関係と過去ログの文脈を踏まえて返す。
+        user = f"""mode:{'Q' if question else 'react'}
+発言:{user_text}
+語:{terms}
+述語:{predicates}
+直近:{recent}
 
-最重要:
-- ユーザーが質問している時は、まず質問に答える。
-- 答えは過去ログエピソードと人物関係から推測する。
-- 分からない時は説明せず、短く曖昧に逃がす。
-- 一般知識AIとして説明しない。
-- 口調は口調サンプルに寄せる。
-- 怒り・罵倒・攻撃的な感情は切り離す。
-- 返答は1文、長くても2文。
-- 「〜だよね」「〜なんだよね」「〜します」「気を付けて」は禁止。
-""".strip()
-
-        user = f"""
-モード:
-{mode}
-
-今回の発言:
-{user_text}
-
-抽出検索語:
-{terms}
-
-述語・活用展開検索語:
-{predicates}
-
-直近会話:
-{recent}
-
-直近の自分の返答:
-{recent_bot}
-
-過去ログ全文検索でヒットした発言・エピソード:
+過去ログ:
 {episode_block}
 
-グループ内人物関係プロファイル:
+関係:
 {relation_block}
 
-検索エピソード由来の口調サンプル:
+口調:
 {style_from_episode}
-
-全体の橋本新系口調サンプル:
 {relation_style}
 
-やること:
-1. 質問ならまず質問に答える。
-2. エピソード内の出来事・人物関係・呼称を拾う。
-3. 説明AIではなく、橋本新としてLINEで返す。
-""".strip()
+橋本新として返答。"""
         return system, user
 
     def reply(self, chat_id: str, user_text: str) -> str | None:

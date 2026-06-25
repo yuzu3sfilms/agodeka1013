@@ -1,11 +1,12 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v11_1_predicate_fuzzy_search",
+  "version": "AI_HASHIMOTO_ARATA_v11_2_token_slim",
   "fixes": [
-    "Add predicate extraction",
-    "Add predicate variant expansion",
-    "Log predicates separately",
-    "Search predicates with lower but meaningful weight",
-    "Keep arbitrary full-sentence ngram search disabled"
+    "Compact relationship profile",
+    "Reduce episode windows",
+    "Reduce context lines",
+    "Shorten prompt",
+    "Reduce max_tokens default to 90",
+    "Keep dynamic search, predicate fuzzy search, relationship QA"
   ],
   "files": [
     "Procfile",
