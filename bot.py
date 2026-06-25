@@ -5,10 +5,11 @@ from collections import defaultdict, deque
 from openai import OpenAI
 
 from dynamic_search import DynamicSearch
-from utils import clean_reply
+from utils import clean_reply, normalize
 
 
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
+CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA", "LIAR", "ARAKUN"]
 
 
 class HashimotoArataBot:
@@ -38,6 +39,10 @@ class HashimotoArataBot:
 
     def context(self, chat_id: str, user_text: str) -> str:
         return "\n".join(list(self.histories[chat_id]) + [user_text])
+
+    def called_directly(self, user_text: str) -> bool:
+        nt = normalize(user_text)
+        return any(normalize(t) in nt for t in CALL_TERMS)
 
     def groq_available(self) -> bool:
         return time.time() >= self.groq_disabled_until
@@ -84,17 +89,24 @@ ChatGPT風に説明しない。
     def reply(self, chat_id: str, user_text: str) -> str | None:
         context = self.context(chat_id, user_text)
         result = self.searcher.search(user_text)
+        called = self.called_directly(user_text)
 
         print(
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
             f"hits={len(result.get('hits', []))}",
             f"episodes={len(result.get('episodes', []))}",
+            f"called={called}",
             flush=True,
         )
 
         if not result.get("episodes"):
             self.remember_user(chat_id, user_text)
+            if called:
+                print("generation path: no_episode_called_capyi", flush=True)
+                answer = ERROR_FALLBACK
+                self.remember_bot(chat_id, answer)
+                return answer
             print("generation path: no_episode_ignore", flush=True)
             return None
 
