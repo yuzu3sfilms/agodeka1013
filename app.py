@@ -102,12 +102,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v9 keyword episode engine is running."
+    return "AI Hashimoto Arata v10 dynamic search engine is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v9-keyword-episode-engine", "time": int(time.time())}
+    return {"ok": True, "version": "v10-dynamic-search-engine", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
@@ -155,7 +155,7 @@ def callback():
             answer = bot.reply(chat_id, user_text)
 
             if answer is None:
-                log("ignored: no keyword")
+                log("ignored: no episode")
                 continue
 
             log("reply:", answer)

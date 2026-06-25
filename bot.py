@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 
 from openai import OpenAI
 
-from episode_engine import EpisodeEngine
+from dynamic_search import DynamicSearch
 from utils import clean_reply
 
 
@@ -15,7 +15,7 @@ class HashimotoArataBot:
     def __init__(self):
         self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
         self.max_tokens = int(os.environ.get("MAX_TOKENS", "160"))
-        self.temperature = float(os.environ.get("TEMPERATURE", "1.0"))
+        self.temperature = float(os.environ.get("TEMPERATURE", "0.95"))
         self.history_len = int(os.environ.get("HISTORY_LEN", "4"))
         self.cooldown_seconds = int(os.environ.get("RATE_LIMIT_COOLDOWN_SECONDS", "900"))
         self.groq_disabled_until = 0.0
@@ -25,7 +25,7 @@ class HashimotoArataBot:
             base_url="https://api.groq.com/openai/v1",
         )
 
-        self.episodes = EpisodeEngine()
+        self.searcher = DynamicSearch()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
 
@@ -45,17 +45,16 @@ class HashimotoArataBot:
     def disable_groq(self):
         self.groq_disabled_until = time.time() + self.cooldown_seconds
 
-    def build_prompt(self, user_text: str, context: str, hits: list[dict], chat_id: str):
-        episode_block = self.episodes.format_episodes(hits)
+    def build_prompt(self, user_text: str, context: str, search_result: dict, chat_id: str):
+        episode_block = self.searcher.format_episodes(search_result)
+        terms = ", ".join(search_result.get("terms", [])[:20])
         recent = "\n".join(context.splitlines()[-self.history_len:])
         recent_bot = "\n".join(self.last_bot_replies[chat_id]) or "なし"
-        trigger_names = ", ".join(h["trigger"] for h in hits)
 
         system = """
 あなたはLINEグループにいた「橋本新」を模倣するAI。
-キーワードが出た時だけ反応する。
-提示された過去ログのエピソードを必ず材料にして返す。
-エピソード内の単語や出来事を最低1つは反応に混ぜる。
+発言から抽出された検索語と、過去LINEログ全文検索で見つかったエピソードを材料に返答する。
+過去ログエピソード内の出来事・語・温度感を最低1つ拾う。
 怒り・罵倒・攻撃的な感情は切り離す。
 ChatGPT風に説明しない。
 ユーザー発言を丸写ししない。
@@ -66,8 +65,8 @@ ChatGPT風に説明しない。
 今回の発言:
 {user_text}
 
-検出キーワード:
-{trigger_names}
+抽出検索語:
+{terms}
 
 直近会話:
 {recent}
@@ -75,35 +74,29 @@ ChatGPT風に説明しない。
 直近の自分の返答:
 {recent_bot}
 
-キーワードに紐づく過去ログエピソード:
+過去ログ全文検索でヒットした発言・エピソード:
 {episode_block}
 
-上のエピソードを踏まえて、橋本新として自然に返答。
+上のヒット/エピソードを踏まえて、橋本新として自然に返答。
 """.strip()
         return system, user
 
     def reply(self, chat_id: str, user_text: str) -> str | None:
         context = self.context(chat_id, user_text)
-        hits = self.episodes.match(user_text, context)
+        result = self.searcher.search(user_text)
 
         print(
-            "episode_check",
-            f"hits={[h['trigger'] for h in hits]}",
-            f"episode_counts={[len(h.get('episodes', [])) for h in hits]}",
+            "dynamic_search",
+            f"terms={result.get('terms', [])[:12]}",
+            f"hits={len(result.get('hits', []))}",
+            f"episodes={len(result.get('episodes', []))}",
             flush=True,
         )
 
-        if not hits:
+        if not result.get("episodes"):
             self.remember_user(chat_id, user_text)
-            print("generation path: no_keyword_ignore", flush=True)
+            print("generation path: no_episode_ignore", flush=True)
             return None
-
-        if not any(h.get("episodes") for h in hits):
-            print("generation path: keyword_no_episode_capyi", flush=True)
-            answer = ERROR_FALLBACK
-            self.remember_user(chat_id, user_text)
-            self.remember_bot(chat_id, answer)
-            return answer
 
         if not self.groq_available():
             print("generation path: groq_cooldown_capyi", flush=True)
@@ -113,7 +106,7 @@ ChatGPT風に説明しない。
             return answer
 
         try:
-            system, user = self.build_prompt(user_text, context, hits, chat_id)
+            system, user = self.build_prompt(user_text, context, result, chat_id)
             res = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -131,7 +124,7 @@ ChatGPT風に説明しない。
                 print("generation path: groq_bad_capyi", flush=True)
                 answer = ERROR_FALLBACK
             else:
-                print("generation path: groq_episode", flush=True)
+                print("generation path: groq_dynamic_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)

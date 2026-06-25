@@ -54,3 +54,9 @@ def clean_reply(user_text: str, reply: str) -> str:
     if too_similar(user_text, reply):
         return ""
     return reply
+
+
+ANGER_TERMS = ["黙", "うるさ", "ふざけ", "キレ", "怒", "バカ", "馬鹿", "カス", "ゴミ", "クソ", "くそ", "消え", "殴", "殺", "死", "帰れ"]
+
+def angerish(text: str) -> bool:
+    return any(t in (text or "") for t in ANGER_TERMS)

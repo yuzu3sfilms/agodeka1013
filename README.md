@@ -1,80 +1,124 @@
-# AI橋本新 v9.1 reaction boost
+# AI橋本新 v10 dynamic search engine
 
-## 修正理由
+## 設計
 
-v9は「キーワード→エピソード→返答生成」の構造にはなったが、反応が鈍い/悪い可能性が残っていた。
-
-主な原因:
-- 短い部分語・汎用triggerが混ざる
-- 長いキーワードより部分語が勝つ
-- context由来triggerがユーザー発言の明示triggerを邪魔する
-- エピソードなしkeywordで即ｷｬﾋﾟｨになりやすい
-
-## v9.1の修正
-
-### 1. 明示trigger優先
-
-ユーザー発言に含まれるtriggerを最優先。
-context由来triggerは、明示triggerがない時だけ使う。
-
-### 2. 長いキーワード優先
-
-`シンギュラリティ` のような長い語がある場合、短い部分語を抑える。
-
-### 3. 内包短語を削除
-
-長いhitに含まれる短いhitは基本的に削除。
-ただし `顎` などのidentity triggerは明示されていれば残す。
-
-### 4. episode補完
-
-キーワード自体にエピソードがない場合でも、
-内包/被内包するepisode付きkeywordを探して補完する。
-
-### 5. エピソード使用を強制
-
-プロンプトで、
+ユーザーの言う本来あるべきプロセスに合わせた版。
 
 ```text
-エピソード内の単語や出来事を最低1つは反応に混ぜる
+発言を受ける
+↓
+その発言の中から検索語をその場で抽出
+↓
+過去LINEログ全文に検索をかける
+↓
+ヒットした発言と周辺エピソードを取得
+↓
+そのエピソードを元にGroqが返答
 ```
 
-を追加。
+## 重要
+
+v10では、事前に「反応するキーワード表」を本体として使わない。
+`all_keywords.txt` や `trigger_keywords.txt` のような固定リスト方式をやめた。
+
+## データ
+
+```text
+data/line_corpus.jsonl.gz
+```
+
+元LINEログ108,530発言をgzip圧縮した全文コーパス。
 
 ## ログ
 
-成功時:
-
 ```text
-episode_check hits=['ムタ'] episode_counts=[3]
-generation path: groq_episode
+dynamic_search terms=[...] hits=... episodes=...
 ```
 
-キーワードあり・エピソード補完あり:
+例:
 
 ```text
-episode_check hits=['ムタソ→ムタ'] episode_counts=[3]
+dynamic_search terms=['顎シンギュラリティ', 'シンギュラリティ', '顎', ...] hits=12 episodes=4
+generation path: groq_dynamic_episode
 ```
 
-キーワードなし:
+### 見方
 
 ```text
-episode_check hits=[]
-generation path: no_keyword_ignore
+terms=[]
 ```
+
+→ 発言から検索語抽出できていない。
+
+```text
+hits=0
+```
+
+→ 検索語はあるが過去ログにヒットしていない。
+
+```text
+episodes=0
+```
+
+→ ヒットはあるが会話窓が作れていない。
+
+```text
+episodes>0
+```
+
+→ エピソードは拾えている。返答が悪ければGroqプロンプト側の問題。
+
+## エラー時
+
+Groq 429 / 例外 / 生成失敗時:
+
+```text
+ｷｬﾋﾟｨ
+```
+
+## 怒りの切り離し
+
+エピソード窓を作る時に、怒り・罵倒っぽい行は材料から外す。
 
 ## ファイル構成
 
 ```text
 app.py
 bot.py
-episode_engine.py
+dynamic_search.py
 utils.py
 persona.md
 requirements.txt
 Procfile
 data/
-  episodes.json
-  episode_keywords.txt
-  all_keywords.txt
+  line_corpus.jsonl.gz
+  speakers.json
 ```
+
+## 必須環境変数
+
+```text
+LINE_CHANNEL_SECRET
+LINE_CHANNEL_ACCESS_TOKEN
+GROQ_API_KEY
+```
+
+## 任意環境変数
+
+```text
+MAX_SEARCH_HITS=6
+MAX_EPISODE_WINDOWS=4
+EPISODE_WINDOW_BEFORE=4
+EPISODE_WINDOW_AFTER=6
+MIN_SEARCH_SCORE=35
+MAX_TOKENS=160
+TEMPERATURE=0.95
+HISTORY_LEN=4
+RATE_LIMIT_COOLDOWN_SECONDS=900
+DEBUG_LOG=1
+```
+
+## 導入
+
+GitHubを更地にして、このZIPの中身を全部アップロード。
+`data/line_corpus.jsonl.gz` が本体。
