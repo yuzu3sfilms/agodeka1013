@@ -61,8 +61,8 @@ class DynamicSearch:
     def __init__(self, data_dir: str = "data"):
         self.data_dir = Path(data_dir)
         self.corpus_path = self.data_dir / "line_corpus.jsonl.gz"
-        self.max_hits = int(os.environ.get("MAX_SEARCH_HITS", "4"))
-        self.max_windows = int(os.environ.get("MAX_EPISODE_WINDOWS", "2"))
+        self.max_hits = int(os.environ.get("MAX_SEARCH_HITS", "10"))
+        self.max_windows = int(os.environ.get("MAX_EPISODE_WINDOWS", "6"))
         self.window_before = int(os.environ.get("EPISODE_WINDOW_BEFORE", "2"))
         self.window_after = int(os.environ.get("EPISODE_WINDOW_AFTER", "3"))
         self.min_score = int(os.environ.get("MIN_SEARCH_SCORE", "45"))

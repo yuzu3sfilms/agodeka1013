@@ -7,6 +7,7 @@ from openai import OpenAI
 
 from dynamic_search import DynamicSearch
 from relationship import RelationshipProfile
+from relevance import RelevanceRanker
 from utils import clean_reply, normalize, de_ai_tone
 
 
@@ -30,6 +31,7 @@ class HashimotoArataBot:
 
         self.searcher = DynamicSearch()
         self.relationships = RelationshipProfile()
+        self.ranker = RelevanceRanker()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
 
@@ -63,6 +65,7 @@ class HashimotoArataBot:
         relation_style = "\n".join(f"- {x}" for x in self.relationships.style_samples(6))
         terms = ", ".join(search_result.get("terms", [])[:8])
         predicates = ", ".join(search_result.get("predicates", [])[:8])
+        rel = ", ".join(str(x) for x in search_result.get("relevance_scores", []))
         recent = "\n".join(context.splitlines()[-2:])
         question = self.is_question(user_text)
 
@@ -78,6 +81,7 @@ class HashimotoArataBot:
 発言:{user_text}
 語:{terms}
 述語:{predicates}
+関連度:{rel}
 直近:{recent}
 
 過去ログ:
@@ -95,7 +99,8 @@ class HashimotoArataBot:
 
     def reply(self, chat_id: str, user_text: str) -> str | None:
         context = self.context(chat_id, user_text)
-        result = self.searcher.search(user_text)
+        raw_result = self.searcher.search(user_text)
+        result = self.ranker.rerank(user_text, raw_result, max_selected=2)
         called = self.called_directly(user_text)
         question = self.is_question(user_text)
 
@@ -103,8 +108,12 @@ class HashimotoArataBot:
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
             f"predicates={result.get('predicates', [])[:12]}",
-            f"hits={len(result.get('hits', []))}",
-            f"episodes={len(result.get('episodes', []))}",
+            f"candidate_hits={len(result.get('hits', []))}",
+            f"candidate_episodes={len(result.get('candidate_episodes', []))}",
+            f"selected_episodes={len(result.get('episodes', []))}",
+            f"relevance_scores={result.get('relevance_scores', [])}",
+            f"relevance_labels={result.get('relevance_labels', [])}",
+            f"qtypes={result.get('question_types', [])}",
             f"called={called}",
             f"question={question}",
             flush=True,
@@ -117,7 +126,7 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
                 self.remember_bot(chat_id, answer)
                 return answer
-            print("generation path: no_episode_ignore", flush=True)
+            print("generation path: no_relevant_episode_ignore", flush=True)
             return None
 
         if not self.groq_available():
@@ -148,7 +157,7 @@ class HashimotoArataBot:
                 print("generation path: groq_bad_capyi", flush=True)
                 answer = ERROR_FALLBACK
             else:
-                print("generation path: groq_relationship_qa", flush=True)
+                print("generation path: groq_v12_relevant_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)
