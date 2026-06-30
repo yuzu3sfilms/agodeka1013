@@ -144,3 +144,96 @@ MAX_TOKENS=90
 ```
 
 を減らす。
+
+
+---
+
+# v12.1 style guard
+
+## 目的
+
+v12で検索関連度は改善したが、生成後の口調がまだ崩れることがあった。
+
+主な問題:
+
+```text
+「〜ぜ」
+「〜ないよ」
+「〜よな」
+「私」
+説明口調
+AIっぽい丁寧な返答
+自分をあらくんとして認識しない
+```
+
+v12.1では `style_guard.py` を追加し、Groqの返答をそのまま返さず、最終チェックしてからLINEへ返す。
+
+## 追加ファイル
+
+```text
+style_guard.py
+```
+
+## 処理
+
+```text
+Groq生成
+↓
+de_ai_tone
+↓
+clean_reply
+↓
+style_guard
+↓
+LINE返信
+```
+
+## 禁止されるもの
+
+```text
+私 / わたし / 俺 / おれ
+AIとして / 私はAI / 橋本新では / 本人では
+〜ぜ / 〜だぜ
+〜ないよ / 〜だよ / 〜よな / 〜だよな / 〜だよね / 〜なんだよね
+です / ます / ですね / ください / と思います
+```
+
+## 方針
+
+橋本っぽさを語尾で作らない。
+
+```text
+説明しすぎない
+一人称を出さない
+短く返す
+雑に返す
+主語を抜く
+```
+
+## ログ
+
+style guardが発動するとこう出る。
+
+```text
+style_guard: {'changed': True, 'reason': ['first_person_removed', 'bad_ending_replaced']}
+generation path: groq_v12_1_style_guard
+```
+
+AI自己説明などが出た場合は安全に落とす。
+
+```text
+style_guard: {'changed': True, 'reason': ['ai_disclaimer']}
+reply: ｷｬﾋﾟｨ
+```
+
+## 推奨環境変数
+
+v12と同じ。
+
+```text
+MAX_SEARCH_HITS=10
+MAX_EPISODE_WINDOWS=6
+EPISODE_WINDOW_BEFORE=2
+EPISODE_WINDOW_AFTER=3
+MAX_TOKENS=90
+```

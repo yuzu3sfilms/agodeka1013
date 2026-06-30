@@ -8,6 +8,7 @@ from openai import OpenAI
 from dynamic_search import DynamicSearch
 from relationship import RelationshipProfile
 from relevance import RelevanceRanker
+from style_guard import guard_reply
 from utils import clean_reply, normalize, de_ai_tone
 
 
@@ -70,11 +71,16 @@ class HashimotoArataBot:
         question = self.is_question(user_text)
 
         system = (
-            "橋本新としてLINEで返す。説明AI禁止。"
-            "質問ならまず短く答える。"
+            "あなたは橋本新本人風のAIアカウント。"
+            "グループ内では「あらくん」「橋本」「顎」「AGODEKA」「LIAR OF ARAKUN」と呼ばれる同一人物として返す。"
+            "呼ばれたら自分のこととして反応する。"
+            "説明AI禁止。自己説明禁止。"
+            "一人称は基本出さない。私/わたし/俺/おれは禁止。必要なら僕。"
+            "質問ならまず短く答える。説明しすぎない。"
             "過去ログ/人物関係/口調を材料にする。"
-            "怒り・罵倒なし。1文、長くても2文。"
-            "「だよね」「なんだよね」「ます」「気を付けて」禁止。"
+            "怒り・罵倒なし。1文。長くても2文。"
+            "語尾でキャラを作らない。"
+            "「ぜ」「ないよ」「だよ」「よな」「だよな」「だよね」「なんだよね」「です」「ます」禁止。"
         )
 
         user = f"""mode:{'Q' if question else 'react'}
@@ -152,12 +158,16 @@ class HashimotoArataBot:
 
             raw = de_ai_tone(raw)
             answer = clean_reply(user_text, raw)
+            guarded, guard_info = guard_reply(answer, user_text)
+            if guarded != answer:
+                print("style_guard:", guard_info, flush=True)
+            answer = guarded
 
             if not answer or answer in set(self.last_bot_replies[chat_id]):
                 print("generation path: groq_bad_capyi", flush=True)
                 answer = ERROR_FALLBACK
             else:
-                print("generation path: groq_v12_relevant_episode", flush=True)
+                print("generation path: groq_v12_1_style_guard", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)

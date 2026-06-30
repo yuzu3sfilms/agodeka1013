@@ -1,12 +1,15 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v12_relevance_engine",
+  "version": "AI_HASHIMOTO_ARATA_v12_1_style_guard",
+  "base": "AI_HASHIMOTO_ARATA_v12_relevance_engine",
   "fixes": [
-    "Add relevance.py",
-    "Rerank candidate episodes before Groq",
-    "Drop weak predicate-only episodes",
-    "Score question-type compatibility",
-    "Log candidate vs selected episodes",
-    "Keep v11.2 token-slim prompt"
+    "Add style_guard.py",
+    "Block first-person drift: 私/わたし/俺/おれ",
+    "Block suspicious endings: ぜ/ないよ/だよ/よな/だよな",
+    "Block polite AI endings: です/ます/ですね/ください/と思います",
+    "Block AI/persona disclaimers",
+    "Shorten overly explanatory replies",
+    "Strengthen system prompt identity lock for あらくん/橋本/顎",
+    "Keep v12 relevance reranking"
   ],
   "files": [
     "Procfile",
@@ -22,6 +25,7 @@
     "relationship.py",
     "relevance.py",
     "requirements.txt",
+    "style_guard.py",
     "utils.py"
   ]
 }
