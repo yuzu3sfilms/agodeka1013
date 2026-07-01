@@ -63,8 +63,8 @@ class DynamicSearch:
         self.corpus_path = self.data_dir / "line_corpus.jsonl.gz"
         self.max_hits = int(os.environ.get("MAX_SEARCH_HITS", "10"))
         self.max_windows = int(os.environ.get("MAX_EPISODE_WINDOWS", "6"))
-        self.window_before = int(os.environ.get("EPISODE_WINDOW_BEFORE", "2"))
-        self.window_after = int(os.environ.get("EPISODE_WINDOW_AFTER", "3"))
+        self.window_before = int(os.environ.get("EPISODE_WINDOW_BEFORE", "4"))
+        self.window_after = int(os.environ.get("EPISODE_WINDOW_AFTER", "6"))
         self.min_score = int(os.environ.get("MIN_SEARCH_SCORE", "45"))
 
         self.messages = []
@@ -296,9 +296,9 @@ class DynamicSearch:
             "end": end,
             "score": hit["score"],
             "matched": hit["matched"],
-            "window": "\n".join(lines)[-480:],
-            "persona": " / ".join(persona_lines[:2])[:140],
-            "persona_lines": persona_lines[:4],
+            "window": "\n".join(lines)[-900:],
+            "persona": " / ".join(persona_lines[:4])[:260],
+            "persona_lines": persona_lines[:8],
         }
 
     def format_episodes(self, result: dict):

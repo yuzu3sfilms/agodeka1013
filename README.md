@@ -359,3 +359,110 @@ CONTINUITY_REPLY_PROBABILITY=0.75
 過去ログにあるエピソードは設定として扱う
 設定にないことは勝手に作らない
 ```
+
+
+---
+
+# v12.3 episode recall fix
+
+## 原因
+
+Renderログでこうなっていた。
+
+```text
+candidate_hits=10
+candidate_episodes=6
+selected_episodes=0
+generation path: no_relevant_episode_ignore
+```
+
+これは検索失敗ではない。
+
+```text
+検索はヒットしている
+↓
+候補エピソードも作れている
+↓
+relevance.py が全部落としている
+```
+
+つまり、v12の関連度判定が厳しすぎて、欲しいエピソードまで殺していた。
+
+## v12.3の修正
+
+### 1. 固有トピック強制保持
+
+`ペヤング` のようなカタカナ語・商品名・固有語がユーザー発言にあり、その語がエピソード窓に出ている場合、低スコアでも落とさない。
+
+```text
+exact_topic
+force_keep_topic
+```
+
+ログ例:
+
+```text
+relevance_labels=['topic']
+force_kept=True
+relevance_reasons=[['exact_topic:ペヤング', 'force_keep_topic']]
+```
+
+### 2. 関連度しきい値を緩和
+
+```text
+min_keep_score: 55 → 45
+strong_score: 85 → 80
+```
+
+### 3. エピソード窓を広げた
+
+```text
+EPISODE_WINDOW_BEFORE: 2 → 4
+EPISODE_WINDOW_AFTER: 3 → 6
+formatted window: 480 chars → 900 chars
+persona lines: 4 → 8
+```
+
+これで、キーワード発言とあらくんの反応が少し離れていても同じエピソードとして入る。
+
+### 4. ログ強化
+
+```text
+relevance_reasons=...
+force_kept=...
+top_rejected=...
+```
+
+これで「候補はあるのに何で落ちたか」が見える。
+
+### 5. エピソード再生を強化
+
+プロンプトに追加。
+
+```text
+ヒットしたエピソードの名詞・出来事・関係性・言い回しを返答に反映する。
+エピソードにある話題を無視して、一般的な返答に逃げない。
+過去ログのエピソードを再生するように、短く反応。
+```
+
+## 推奨環境変数
+
+```text
+MAX_SEARCH_HITS=10
+MAX_EPISODE_WINDOWS=6
+EPISODE_WINDOW_BEFORE=4
+EPISODE_WINDOW_AFTER=6
+MAX_TOKENS=90
+
+CONTINUITY_SECONDS=420
+CONTINUITY_MIN_HISTORY=1
+CONTINUITY_REPLY_PROBABILITY=0.75
+```
+
+## v12.3の狙い
+
+```text
+検索で拾えたエピソードをrelevanceで殺さない
+ペヤング/牛角/二郎/ニッパーのような固有話題を必ず再生候補に残す
+過去ログを設定として反応に使う
+```

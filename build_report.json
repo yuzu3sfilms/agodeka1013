@@ -1,15 +1,15 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v12_2_continuity_canon_fix",
-  "base": "AI_HASHIMOTO_ARATA_v12_1_style_guard",
+  "version": "AI_HASHIMOTO_ARATA_v12_3_episode_recall_fix",
+  "base": "AI_HASHIMOTO_ARATA_v12_2_continuity_canon_fix",
   "fixes": [
-    "Remove LIAR/ARAKUN from direct call terms",
-    "Do not treat AI as a call term",
-    "Add conversation continuity fallback for mid-conversation silence",
-    "Add CONTINUITY_SECONDS / CONTINUITY_REPLY_PROBABILITY env vars",
-    "Add canon lock: retrieved episodes are treated as persona setting/memory/relationship ground truth",
-    "Prompt forbids contradicting retrieved episodes",
-    "Fallback prompt forbids inventing new settings when no relevant episode exists",
-    "Update app health/version strings"
+    "Fix candidate_episodes being killed by relevance threshold",
+    "Force keep episodes with exact concrete topic terms like ペヤング",
+    "Lower min_keep_score from 55 to 45",
+    "Add relevance_reasons / top_rejected / force_kept logs",
+    "Widen episode windows before=4 after=6",
+    "Increase formatted episode context from 480 to 900 chars",
+    "Increase persona lines included in episode",
+    "Strengthen prompt: retrieved episodes are canon and must be reflected, not ignored"
   ],
   "files": [
     "Procfile",

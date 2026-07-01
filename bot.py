@@ -120,6 +120,7 @@ class HashimotoArataBot:
         terms = ", ".join(search_result.get("terms", [])[:8])
         predicates = ", ".join(search_result.get("predicates", [])[:8])
         rel = ", ".join(str(x) for x in search_result.get("relevance_scores", []))
+        reasons = str(search_result.get("relevance_reasons", []))[:300]
         recent = "\n".join(context.splitlines()[-2:])
         question = self.is_question(user_text)
 
@@ -133,6 +134,8 @@ class HashimotoArataBot:
             "過去ログエピソードは単なる参考材料ではなく、この人物の設定・記憶・関係性の根拠。"
             "返答は過去ログエピソードに矛盾してはいけない。"
             "エピソードに根拠がある時は、その事実・関係・ノリを優先する。一般論で埋めない。"
+            "ヒットしたエピソードの名詞・出来事・関係性・言い回しを返答に反映する。"
+            "エピソードにある話題を無視して、一般的な返答に逃げない。"
             "エピソードにないことを勝手に断定しない。"
             "怒り・罵倒なし。1文。長くても2文。"
             "語尾でキャラを作らない。"
@@ -144,6 +147,7 @@ class HashimotoArataBot:
 語:{terms}
 述語:{predicates}
 関連度:{rel}
+採用理由:{reasons}
 直近:{recent}
 
 過去ログ:
@@ -159,6 +163,8 @@ class HashimotoArataBot:
 厳守:
 - 過去ログは設定。矛盾禁止。
 - 検索エピソードに出ている人物関係・出来事・好みを優先。
+- ヒット語とエピソード内の固有名詞を無視しない。
+- 過去ログのエピソードを再生するように、短く反応。
 - 根拠が薄い時は断定せず短く反応。
 - 綺麗に説明しない。
 
@@ -181,6 +187,9 @@ class HashimotoArataBot:
             f"selected_episodes={len(result.get('episodes', []))}",
             f"relevance_scores={result.get('relevance_scores', [])}",
             f"relevance_labels={result.get('relevance_labels', [])}",
+            f"relevance_reasons={result.get('relevance_reasons', [])}",
+            f"force_kept={result.get('force_kept', False)}",
+            f"top_rejected={result.get('top_rejected_scores', [])}",
             f"qtypes={result.get('question_types', [])}",
             f"called={called}",
             f"question={question}",
@@ -230,9 +239,9 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v12_2_continuity_fallback", flush=True)
+                    print("generation path: groq_v12_3_continuity_fallback", flush=True)
                 else:
-                    print("generation path: groq_v12_2_relevant_episode", flush=True)
+                    print("generation path: groq_v12_3_episode_canon", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)
