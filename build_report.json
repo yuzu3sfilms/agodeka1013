@@ -1,33 +1,22 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v12_4_topic_search_fix",
-  "base": "AI_HASHIMOTO_ARATA_v12_3_episode_recall_fix",
-  "critical_fix": "dynamic_search.py now uses topic-first retrieval so concrete terms like ペヤング are not drowned out by generic terms like 今日.",
+  "version": "AI_HASHIMOTO_ARATA_v12_5_canon_answer_fix",
+  "base": "AI_HASHIMOTO_ARATA_v12_4_topic_search_fix",
+  "critical_fix": "Add deterministic canon_answer.py before Groq for count questions grounded in retrieved episodes.",
   "local_test": {
     "query": "今日はペヤング何個食べるの？",
-    "topic_terms": [
-      "ペヤング"
-    ],
-    "search_mode": "topic_first",
-    "candidate_hits": 5,
-    "candidate_episodes": 5,
     "selected_episodes": 2,
-    "relevance_scores": [
-      144,
-      122
-    ],
-    "matched_examples": [
-      "ペヤング25個食べてる途中なんでしょ",
-      "ペヤング50個食べれそう"
-    ]
+    "canon_answer": "25個の途中",
+    "evidence": "坂口: ペヤング25個食べてる途中なんでしょ",
+    "generation_path": "canon_v12_5_answer"
   },
   "fixes": [
-    "Rewrite dynamic_search.py with topic-first retrieval",
-    "Split extracted terms into topic_terms and generic_terms",
-    "When topic_terms exist, search topic terms first and ignore generic hits if topic hits exist",
-    "Fallback to generic/predicate only when topic search returns zero hits",
-    "Remove count/action chunks like 何個食 from topic_terms",
-    "Log topic_terms/generic_terms/search_mode",
-    "Keep v12.3 relevance force-keep and canon prompt"
+    "Add canon_answer.py",
+    "Detect count questions like 何個/何人/何枚/何回",
+    "Extract counts near topic terms from retrieved episodes",
+    "Bypass Groq when canon answer is available",
+    "Prevent tense/hallucination drift like 予定/つもり/食べました",
+    "Keep v12.4 topic-first retrieval",
+    "Keep v12.1 style guard and v12.2 continuity/canon prompt"
   ],
   "files": [
     "Procfile",
@@ -35,6 +24,7 @@
     "app.py",
     "bot.py",
     "build_report.json",
+    "canon_answer.py",
     "data/line_corpus.jsonl.gz",
     "data/relationship_profile.json",
     "data/speakers.json",

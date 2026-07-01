@@ -597,3 +597,115 @@ CONTINUITY_REPLY_PROBABILITY=0.75
 エピソード検索はまずtopic-first
 topicが拾えたらgenericは使わない
 ```
+
+
+---
+
+# v12.5 canon answer fix
+
+## 問題
+
+v12.4で検索は直った。
+
+```text
+topic_terms=['ペヤング']
+search_mode=topic_first
+selected_episodes=2
+```
+
+しかしGroqが勝手に文を作っていた。
+
+```text
+ペヤング25個食べる予定だ
+ペヤング25個食べるつもりだ
+ペヤング25個食べたことあるから、25個以上は無理
+25個食べました
+```
+
+これは、過去ログに答えがあるのにLLMに考えさせているのが原因。
+
+## v12.5の修正
+
+`canon_answer.py` を追加。
+
+```text
+過去ログから確定答えが取れる
+↓
+Groqを呼ばない
+↓
+過去ログ由来の短い答えを直接返す
+```
+
+## 対象
+
+まずは数値質問。
+
+```text
+何個？
+何人？
+何枚？
+何回？
+何本？
+何杯？
+いくつ？
+```
+
+## ペヤング例
+
+入力:
+
+```text
+今日はペヤング何個食べるの？
+```
+
+検索されたエピソード:
+
+```text
+坂口: ペヤング25個食べてる途中なんでしょ
+```
+
+v12.5の返答:
+
+```text
+25個の途中
+```
+
+## ログ
+
+成功時:
+
+```text
+canon_answer: {'used': True, 'type': 'count', ...}
+generation path: canon_v12_5_answer
+```
+
+この時はGroqを呼ばない。
+
+スキップ時:
+
+```text
+canon_answer_skip: {'used': False, 'reason': 'not_count_question'}
+```
+
+その場合は従来通りGroqへ。
+
+## 狙い
+
+```text
+予定/つもり/食べました みたいな勝手な時制改変を止める
+過去ログに答えがある質問は、設定から直接答える
+LLMに考えさせる部分を減らす
+```
+
+## 推奨環境変数
+
+v12.4と同じ。
+
+```text
+MAX_SEARCH_HITS=12
+MAX_EPISODE_WINDOWS=6
+EPISODE_WINDOW_BEFORE=4
+EPISODE_WINDOW_AFTER=6
+MIN_SEARCH_SCORE=35
+MAX_TOKENS=90
+```

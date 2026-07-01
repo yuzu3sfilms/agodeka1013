@@ -9,6 +9,7 @@ from dynamic_search import DynamicSearch
 from relationship import RelationshipProfile
 from relevance import RelevanceRanker
 from style_guard import guard_reply
+from canon_answer import CanonAnswer
 from utils import clean_reply, normalize, de_ai_tone
 
 
@@ -33,6 +34,7 @@ class HashimotoArataBot:
         self.searcher = DynamicSearch()
         self.relationships = RelationshipProfile()
         self.ranker = RelevanceRanker()
+        self.canon_answer = CanonAnswer()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
@@ -208,6 +210,21 @@ class HashimotoArataBot:
             print("generation path: no_relevant_episode_ignore", flush=True)
             return None
 
+        if not no_relevant_episode:
+            canon, canon_info = self.canon_answer.answer(user_text, result)
+            if canon:
+                guarded, guard_info = guard_reply(canon, user_text)
+                print("canon_answer:", canon_info, flush=True)
+                if guarded != canon:
+                    print("style_guard:", guard_info, flush=True)
+                answer = guarded
+                print("generation path: canon_v12_5_answer", flush=True)
+                self.remember_user(chat_id, user_text)
+                self.remember_bot(chat_id, answer)
+                return answer
+            else:
+                print("canon_answer_skip:", canon_info, flush=True)
+
         if not self.groq_available():
             print("generation path: groq_cooldown_capyi", flush=True)
             answer = ERROR_FALLBACK
@@ -244,9 +261,9 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v12_4_continuity_fallback", flush=True)
+                    print("generation path: groq_v12_5_continuity_fallback", flush=True)
                 else:
-                    print("generation path: groq_v12_4_topic_episode", flush=True)
+                    print("generation path: groq_v12_5_topic_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)
