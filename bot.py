@@ -12,11 +12,14 @@ from style_guard import guard_reply
 from canon_answer import CanonAnswer
 from persona_judge import PersonaJudge
 from actual_reply_engine import ActualReplyEngine
+from current_state_engine import CurrentStateEngine
+from reply_policy import ReplyPolicy
 from utils import clean_reply, normalize, de_ai_tone
 
 
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA"]
+ATTENTION_ONLY_TERMS = {"ねえ", "ねぇ", "ちょっと", "おい", "あの", "なあ", "なぁ"}
 
 
 class HashimotoArataBot:
@@ -39,6 +42,8 @@ class HashimotoArataBot:
         self.canon_answer = CanonAnswer()
         self.persona_judge = PersonaJudge()
         self.replay_engine = ActualReplyEngine()
+        self.current_state = CurrentStateEngine()
+        self.reply_policy = ReplyPolicy()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
@@ -49,11 +54,11 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.2",
+            "version=v14.5",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
-            f"replay_scenes={len(getattr(self.replay_engine, 'scenes', []))}",
+            f"replay_scenes={len(getattr(self.replay_engine, 'scenes', []))}", f"policy=True",
             flush=True,
         )
 
@@ -69,6 +74,12 @@ class HashimotoArataBot:
         return "\n".join(list(self.histories[chat_id]) + [user_text])
 
     def should_inherit_topic(self, chat_id: str, user_text: str, raw_result: dict) -> bool:
+        stripped = (user_text or "").strip()
+        # v14.4:
+        # Do not inherit previous topic for attention-only fillers.
+        # "ねえ" / "ちょっと" should not repeatedly trigger the last topic scene.
+        if stripped in ATTENTION_ONLY_TERMS:
+            return False
         if raw_result.get("topic_terms"):
             return False
         if not self.last_topic_terms[chat_id]:
@@ -76,7 +87,7 @@ class HashimotoArataBot:
         # Inherit for short follow-up questions or vague replies.
         if self.is_question(user_text):
             return True
-        if len(user_text.strip()) <= 12 and raw_result.get("candidate_hits", 0) == 0:
+        if len(stripped) <= 12 and raw_result.get("candidate_hits", 0) == 0:
             return True
         return False
 
@@ -230,8 +241,30 @@ class HashimotoArataBot:
 
         result = self.ranker.rerank(user_text, raw_result, max_selected=2)
         result["inherited_topic"] = inherited_topic
-        called = self.called_directly(user_text)
-        question = self.is_question(user_text)
+
+        state = self.current_state.classify(
+            user_text=user_text,
+            history=list(self.histories[chat_id]),
+            last_topic_terms=self.last_topic_terms[chat_id],
+            search_result=result,
+        )
+        if state.get("inherited_topic") and not inherited_topic:
+            inherited_topic = True
+            inherited_text = user_text + " " + " ".join(state.get("topic_terms", []))
+            print("state_topic_inherit:", state.get("topic_terms", []), "augmented_text=", inherited_text, flush=True)
+            raw_result = self.searcher.search(inherited_text)
+            result = self.ranker.rerank(user_text, raw_result, max_selected=2)
+            result["inherited_topic"] = True
+            state = self.current_state.classify(
+                user_text=user_text,
+                history=list(self.histories[chat_id]),
+                last_topic_terms=self.last_topic_terms[chat_id],
+                search_result=result,
+            )
+
+        called = state.get("called", False)
+        question = state.get("question", False)
+        print("current_state:", state, flush=True)
 
         print(
             "dynamic_search",
@@ -258,13 +291,21 @@ class HashimotoArataBot:
         self.remember_topics(chat_id, result)
 
         no_relevant_episode = not result.get("episodes")
+        policy = self.reply_policy.plan(state, has_relevant_episode=not no_relevant_episode)
+        print("reply_policy:", policy, flush=True)
 
-        if no_relevant_episode and not self.should_continue_reply(chat_id, user_text, called, question):
+        if not policy.get("reply"):
             self.remember_user(chat_id, user_text)
-            print("generation path: no_relevant_episode_ignore", flush=True)
+            print("generation path: policy_silence", flush=True)
             return None
 
-        if not no_relevant_episode:
+        if no_relevant_episode and not self.should_continue_reply(chat_id, user_text, called, question):
+            if "fallback" not in policy.get("routes", []):
+                self.remember_user(chat_id, user_text)
+                print("generation path: no_relevant_episode_ignore", flush=True)
+                return None
+
+        if not no_relevant_episode and "canon" in policy.get("routes", []):
             canon, canon_info = self.canon_answer.answer(user_text, result)
             if canon:
                 guarded, guard_info = guard_reply(canon, user_text)
@@ -272,34 +313,44 @@ class HashimotoArataBot:
                 if guarded != canon:
                     print("style_guard:", guard_info, flush=True)
                 answer = guarded
-                print("generation path: canon_v12_5_answer", flush=True)
+                print("generation path: canon_v14_5_policy_answer", flush=True)
                 self.remember_user(chat_id, user_text)
                 self.remember_bot(chat_id, answer)
                 return answer
             else:
                 print("canon_answer_skip:", canon_info, flush=True)
+        elif "canon" not in policy.get("routes", []):
+            print("canon_answer_skip:", {"used": False, "reason": "policy_skipped_canon"}, flush=True)
 
-        # v14: actual-reply-first replay engine.
+        # v14.3: actual-reply-first replay engine controlled by reply_policy.
         # If a similar past situation exists, replay an actual Hashimoto reply
         # before asking Groq to invent anything.
-        if not no_relevant_episode:
-            replay, replay_info = self.replay_engine.choose(
-                user_text=user_text,
-                context=context,
-                topic_terms=result.get("topic_terms", []),
-            )
-            print("replay_engine:", replay_info, flush=True)
-            if replay:
-                guarded, guard_info = guard_reply(replay, user_text)
-                if guarded != replay:
-                    print("style_guard:", guard_info, flush=True)
-                answer = guarded
-                print("generation path: replay_v14_2_scene_reply", flush=True)
-                self.remember_user(chat_id, user_text)
-                self.remember_bot(chat_id, answer)
-                return answer
+        if "scene_replay" in policy.get("routes", []):
+            if not no_relevant_episode:
+                replay, replay_info = self.replay_engine.choose(
+                    user_text=user_text,
+                    context=context,
+                    topic_terms=state.get("topic_terms") or result.get("topic_terms", []),
+                )
+                print("replay_engine:", replay_info, flush=True)
+                if replay:
+                    guarded, guard_info = guard_reply(replay, user_text)
+                    if guarded != replay:
+                        print("style_guard:", guard_info, flush=True)
+                    answer = guarded
+                    print("generation path: replay_v14_5_intent_ranked_scene_reply", flush=True)
+                    self.remember_user(chat_id, user_text)
+                    self.remember_bot(chat_id, answer)
+                    return answer
+            else:
+                print("replay_engine_skip: no_relevant_episode", flush=True)
         else:
-            print("replay_engine_skip: no_relevant_episode", flush=True)
+            print("replay_engine_skip: policy_skipped_scene_replay", flush=True)
+
+        if "fallback" not in policy.get("routes", []):
+            self.remember_user(chat_id, user_text)
+            print("generation path: policy_no_fallback_silence", flush=True)
+            return None
 
         if not self.groq_available():
             print("generation path: groq_cooldown_capyi", flush=True)
@@ -348,9 +399,9 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v14_fallback_judged_continuity", flush=True)
+                    print("generation path: groq_v14_5_policy_fallback_continuity", flush=True)
                 else:
-                    print("generation path: groq_v14_fallback_judged_episode", flush=True)
+                    print("generation path: groq_v14_5_policy_fallback_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)

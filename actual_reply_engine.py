@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from utils import normalize
+from query_intent import intent_profile
 
 
 MEDIA_REPLIES = {
@@ -16,20 +17,45 @@ MEDIA_REPLIES = {
 BAD_DIRECT_REPLIES = MEDIA_REPLIES | {"?", "？", "↑", "…", "…。", ""}
 ASSERTION_WORDS = ["好き", "嫌い", "予定", "つもり", "食べました", "食べたこと", "絶対", "いつも"]
 
+NOSTALGIA_CUES = ["なつかしい", "懐かしい"]
+EXPAND_CUES = ["なに", "何", "それ何", "どんな", "話", "エピソード", "説明", "由来", "なんだっけ", "覚えてる"]
+
+
+
+
+def _reply_has_substantive_episode_content(reply: str):
+    r = reply or ""
+    # Not a hard truth detector; just a general signal that the reply carries
+    # more than an exact topic echo.
+    return (
+        len(r) >= 16
+        or bool(re.search(r"とは|という|呼び|なつかし|懐かし|あります|ありま|いた|いました|何時|どこ|誰|だれ|ぼくぅ|です|ます", r))
+    )
+
+
+def _is_bare_topic_echo(reply: str, topic_terms):
+    topic_terms = [t for t in (topic_terms or []) if t]
+    if not topic_terms:
+        return False
+    r = re.sub(r"[。…。！？!?、\s]+", "", reply or "")
+    joined = "".join(topic_terms)
+    # e.g. reply "グランド土塚…。" when topic_terms are ["グランド", "土塚"]
+    return r == joined or all(t in r for t in topic_terms) and len(r) <= len(joined) + 4
+
 
 def extract_tokens(text: str):
     toks = re.findall(
-        r"[ァ-ヴｦ-ﾟー]{2,}|[A-Za-z][A-Za-z0-9_\-]{2,}|[一-龥々〆ヵヶ]{2,}|[0-9０-９]+\s*(?:個|人|枚|回|本|杯|兆個|兆)",
+        r"[ぁ-んー]{2,}|[ァ-ヴｦ-ﾟー]{2,}|[A-Za-z][A-Za-z0-9_\-]{2,}|[一-龥々〆ヵヶ]{2,}|[0-9０-９]+\s*(?:個|人|枚|回|本|杯|兆個|兆)",
         text or "",
     )
-    bad = {"今日", "明日", "昨日", "これ", "それ", "あれ", "する", "した", "して", "いる", "ある", "ない", "何個", "何回"}
+    bad = {"今日", "明日", "昨日", "これ", "それ", "あれ", "する", "した", "して", "いる", "ある", "ない", "何個", "何回", "ねえ", "ちょっと", "おい", "あの", "えっと", "うん", "はい"}
     return [t for t in toks if t not in bad]
 
 
 class ActualReplyEngine:
     """
-    v14.2:
-    Clean conversation-state replay engine.
+    v14.5:
+    Conversation-state replay engine with general query-intent ranking.
 
     LINE group replies are not always direct replies to the immediately
     previous message. So we index whole scenes around Hashimoto's utterances,
@@ -124,7 +150,9 @@ class ActualReplyEngine:
                 score += add
                 matches.append(t)
             if in_reply:
-                score += 22
+                # If the user's actual wording appears in Hashimoto's real reply,
+                # this is usually the best replay candidate.
+                score += 42
                 reasons.append(f"reply_token:{t}")
 
         if matches:
@@ -177,6 +205,52 @@ class ActualReplyEngine:
         if bad_assert:
             score -= 35
             reasons.append(f"unsupported_in_actual?:{bad_assert}")
+
+        # v14.5: phrase-level match for hiragana predicates like なつかしい.
+        # This fixes cases where "なつかしい?" should prefer
+        # "グランド土塚なつかしいわあ" over generic repeated topic replies.
+        user_tokens = extract_tokens(user_text or "")
+        for ut in user_tokens:
+            if len(ut) >= 3 and normalize(ut) in normalize(reply):
+                score += 55
+                reasons.append(f"user_phrase_in_reply:{ut}")
+
+        # v14.5: general query-intent ranking.
+        # Do not special-case only "なつかしい". Categorize the user's follow-up
+        # and choose actual replies that fit the category.
+        qprof = intent_profile(user_text or "")
+
+        if qprof.get("wants_expansion"):
+            if _reply_has_substantive_episode_content(reply):
+                score += 42
+                reasons.append("intent_expand_substantive_reply")
+            if _is_bare_topic_echo(reply, topic_terms):
+                score -= 45
+                reasons.append("intent_expand_penalize_bare_echo")
+
+        if qprof.get("wants_memory"):
+            # Memory/nostalgia questions should prefer actual replies that also
+            # sound like recall, not just topic echo.
+            if re.search(r"なつかし|懐かし|覚え|昔|前|古", reply):
+                score += 70
+                reasons.append("intent_memory_reply_match")
+            elif _is_bare_topic_echo(reply, topic_terms):
+                score -= 30
+                reasons.append("intent_memory_penalize_bare_echo")
+
+        if qprof.get("wants_explanation"):
+            if re.search(r"とは|という|呼び|です|ます|存在|つまり|だから|ので|ため|ソウル|モード|合体|崇め", reply):
+                score += 45
+                reasons.append("intent_explain_reply_match")
+            if _is_bare_topic_echo(reply, topic_terms):
+                score -= 40
+                reasons.append("intent_explain_penalize_bare_echo")
+
+        if qprof.get("wants_exact_answer"):
+            # Exact-answer prompts benefit from replies containing answer-like forms.
+            if re.search(r"[0-9０-９]+|あります|ない|いません|います|何時|どこ|誰|だれ", reply):
+                score += 28
+                reasons.append("intent_exact_answer_like")
 
         if score < self.min_score:
             return None

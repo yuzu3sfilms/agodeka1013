@@ -1,28 +1,28 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v14_2_clean_rebuild",
-  "base": "AI_HASHIMOTO_ARATA_v14_1_conversation_state_replay",
-  "type": "major-clean-rebuild",
-  "philosophy": "生成するな、再演しろ",
-  "main_engine": "conversation-state replay",
-  "cleanup": {
-    "readme_rewritten": true,
-    "build_report_rewritten": true,
-    "removed_legacy_reply_pair_files": [
-      "data/reply_pairs.jsonl.gz",
-      "data/reply_pair_stats.json"
-    ],
-    "actual_reply_engine_scene_only": true,
-    "style_guard_light": true,
-    "version_strings_unified": "v14.2"
+  "version": "AI_HASHIMOTO_ARATA_v14_5_general_query_intent_ranker",
+  "base": "AI_HASHIMOTO_ARATA_v14_4_scene_ranker_attention_fix",
+  "type": "v14-generalization-upgrade",
+  "new_files": [
+    "query_intent.py"
+  ],
+  "fixes": [
+    "Generalizes follow-up handling from individual words to query intent categories",
+    "Adds memory_recall, meaning_explain, existence_check, time/place/person/count question, yesno, attention, generic question categories",
+    "Ranks actual Hashimoto replies based on query intent rather than short exact match only",
+    "Penalizes bare topic echoes when the user asks for expansion/explanation/recall"
+  ],
+  "local_tests": {
+    "なつかしい？": "グランド土塚なつかしいわあ",
+    "それ何？": "これをグランド土塚と呼び、崇めたてまつります。",
+    "由来は？": "これをグランド土塚と呼び、崇めたてまつります。",
+    "覚えてる？": "グランド土塚なつかしいわあ"
   },
-  "data_files": [
-    "conversation_scene_stats.json",
-    "conversation_scenes.jsonl.gz",
-    "hashimoto_persona_profile.json",
-    "line_corpus.jsonl.gz",
-    "relationship_profile.json",
-    "speakers.json",
-    "topic_canon_profile.json"
+  "expected_startup_log": "bot_init: version=v14.5 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True",
+  "expected_paths": [
+    "generation path: replay_v14_5_intent_ranked_scene_reply",
+    "generation path: canon_v14_5_policy_answer",
+    "generation path: groq_v14_5_policy_fallback_episode",
+    "generation path: groq_v14_5_policy_fallback_continuity"
   ],
   "scene_stats": {
     "n_messages": 108530,
@@ -192,13 +192,15 @@
       ]
     ]
   },
-  "runtime_flow": [
-    "canon_answer",
-    "actual_reply_engine scene_replay",
-    "Groq fallback + persona_judge"
+  "data_files": [
+    "conversation_scene_stats.json",
+    "conversation_scenes.jsonl.gz",
+    "hashimoto_persona_profile.json",
+    "line_corpus.jsonl.gz",
+    "relationship_profile.json",
+    "speakers.json",
+    "topic_canon_profile.json"
   ],
-  "expected_startup_log": "bot_init: version=v14.2 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546",
-  "expected_replay_path": "generation path: replay_v14_2_scene_reply",
   "files": [
     "Procfile",
     "README.md",
@@ -207,6 +209,7 @@
     "bot.py",
     "build_report.json",
     "canon_answer.py",
+    "current_state_engine.py",
     "data/conversation_scene_stats.json",
     "data/conversation_scenes.jsonl.gz",
     "data/hashimoto_persona_profile.json",
@@ -217,8 +220,10 @@
     "dynamic_search.py",
     "persona.md",
     "persona_judge.py",
+    "query_intent.py",
     "relationship.py",
     "relevance.py",
+    "reply_policy.py",
     "requirements.txt",
     "style_guard.py",
     "utils.py"
