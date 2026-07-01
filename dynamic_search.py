@@ -8,16 +8,26 @@ from utils import normalize, angerish
 
 
 PERSONA_SPEAKERS = {"LIAR  OF  ARAKUN", "Unknown", "橋本新", "Arata Hashimoto"}
-CRITICAL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "牛角", "二郎", "野猿", "ムタ", "ムタソ", "きゃぴ", "ｷｬﾋﾟｨ", "ぼくぅ"]
+
+CRITICAL_TERMS = [
+    "顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた",
+    "牛角", "二郎", "野猿", "ムタ", "ムタソ", "ペヤング",
+    "きゃぴ", "ｷｬﾋﾟｨ", "ぼくぅ",
+]
+
+# These can be searched only when no concrete topic exists.
+GENERIC_TERMS = {
+    "今日", "明日", "昨日", "何個", "何人", "何枚", "何回", "何時",
+    "お前", "俺", "僕", "私", "それ", "これ", "あれ",
+    "する", "なる", "いる", "ある", "ない", "できる", "来る", "行く",
+    "食べる", "食う", "使う", "作る", "やる", "見る", "言う", "思う",
+}
 
 BAD_QUERY_CHUNKS = {
     "お前", "何に", "なの", "です", "ます", "した", "して", "から", "ので",
     "あるの", "いるの", "それ", "これ", "あれ",
 }
 
-# Predicate stems / variants.
-# key: a surface or normalized predicate cue from user text
-# values: terms searched in corpus
 PREDICATE_VARIANTS = {
     "遅れる": ["遅れ", "遅刻", "遅い", "遅れる", "遅れて", "遅れた"],
     "遅れ": ["遅れ", "遅刻", "遅い", "遅れる"],
@@ -47,25 +57,32 @@ PREDICATE_VARIANTS = {
     "知る": ["知ってる", "知る", "知った"],
     "呼ぶ": ["呼ぶ", "呼ん", "呼ばれ", "名乗"],
     "名乗": ["名乗", "呼ばれ", "呼ぶ"],
+    "食べる": ["食べる", "食べた", "食う", "食った", "何個", "ペヤング"],
+    "食う": ["食う", "食った", "食べる", "食べた"],
 }
+
+KATAKANA_RE = re.compile(r"[ァ-ヴｦ-ﾟー]{2,}")
+ALNUM_RE = re.compile(r"[A-Za-z][A-Za-z0-9_\-]{2,}")
+KANJI_RE = re.compile(r"[一-龥々〆ヵヶ]{2,}")
 
 
 class DynamicSearch:
     """
-    v11.1:
-    - 固有名詞/名詞検索は維持
-    - 述語系は完全一致に依存せず、語幹・活用・言い換え候補に展開して検索
-    - 雑な全文n-gram暴発は復活させない
+    v12.4:
+    Topic-first retrieval.
+
+    If a concrete topic exists, such as ペヤング, 牛角, 二郎, ニッパー,
+    do NOT fill the hit list with generic terms like 今日.
     """
 
     def __init__(self, data_dir: str = "data"):
         self.data_dir = Path(data_dir)
         self.corpus_path = self.data_dir / "line_corpus.jsonl.gz"
-        self.max_hits = int(os.environ.get("MAX_SEARCH_HITS", "10"))
+        self.max_hits = int(os.environ.get("MAX_SEARCH_HITS", "12"))
         self.max_windows = int(os.environ.get("MAX_EPISODE_WINDOWS", "6"))
         self.window_before = int(os.environ.get("EPISODE_WINDOW_BEFORE", "4"))
         self.window_after = int(os.environ.get("EPISODE_WINDOW_AFTER", "6"))
-        self.min_score = int(os.environ.get("MIN_SEARCH_SCORE", "45"))
+        self.min_score = int(os.environ.get("MIN_SEARCH_SCORE", "35"))
 
         self.messages = []
         self.persona_style_lines = []
@@ -89,14 +106,14 @@ class DynamicSearch:
     def extract_terms(self, user_text: str):
         raw = user_text or ""
         nt = normalize(raw)
+
         terms = set()
-        predicate_terms = set()
+        predicates = set()
 
         for t in CRITICAL_TERMS:
             if normalize(t) in nt:
                 terms.add(t)
 
-        # Noun/proper-ish chunks.
         patterns = [
             r"[A-Za-z][A-Za-z0-9_\-]{2,}",
             r"[ァ-ヴｦ-ﾟー]{2,}",
@@ -108,39 +125,37 @@ class DynamicSearch:
                 if self._good_term(tok):
                     terms.add(tok)
 
-        # Mixed chunks, but reject sentence-like Japanese unless proper-ish.
+        # Mixed chunks are dangerous. Keep only if they contain katakana/latin/critical.
         for tok in re.findall(r"[A-Za-z0-9一-龥々〆ヵヶァ-ヴｦ-ﾟぁ-んー]{3,}", raw):
             tok = tok.strip()
             if self._good_mixed_term(tok):
                 terms.add(tok)
 
-        # Predicate expansion.
-        predicate_terms.update(self.extract_predicates(raw))
+        predicates.update(self.extract_predicates(raw))
 
-        # Prefer terms separately; predicate terms are searched with lower but meaningful weight.
         terms = sorted(terms, key=lambda x: (len(normalize(x)), x), reverse=True)[:14]
-        preds = sorted(predicate_terms, key=lambda x: (len(normalize(x)), x), reverse=True)[:20]
-        return terms, preds
+        preds = sorted(predicates, key=lambda x: (len(normalize(x)), x), reverse=True)[:20]
+
+        topic_terms = [t for t in terms if self._is_topic_term(t)]
+        generic_terms = [t for t in terms if not self._is_topic_term(t)]
+
+        return terms, preds, topic_terms, generic_terms
 
     def extract_predicates(self, raw: str):
         nt = normalize(raw)
         preds = set()
 
-        # dictionary-based variants
         for cue, variants in PREDICATE_VARIANTS.items():
             if normalize(cue) in nt:
                 for v in variants:
                     if self._good_predicate(v):
                         preds.add(v)
 
-        # simple Japanese verb/adjective surface extraction
-        # e.g. 遅れる/使う/作ってる/行きたい/欲しい
         surfaces = re.findall(r"[一-龥々〆ヵヶぁ-んー]{2,}(?:る|た|てる|て|たい|ない|れる|られる|しい|い)", raw)
         for s in surfaces:
             if not self._good_predicate(s):
                 continue
             preds.add(s)
-            # crude stems
             for suf in ["てる", "れる", "られる", "たい", "ない", "しい", "る", "た", "て", "い"]:
                 if s.endswith(suf) and len(s) > len(suf) + 1:
                     stem = s[:-len(suf)]
@@ -154,7 +169,7 @@ class DynamicSearch:
         nt = normalize(term)
         if not nt:
             return False
-        if nt in BAD_QUERY_CHUNKS:
+        if nt in {normalize(x) for x in BAD_QUERY_CHUNKS}:
             return False
         if len(nt) < 2:
             return False
@@ -164,7 +179,9 @@ class DynamicSearch:
 
     def _good_term(self, term: str):
         nt = normalize(term)
-        if not nt or nt in BAD_QUERY_CHUNKS:
+        if not nt:
+            return False
+        if nt in {normalize(x) for x in BAD_QUERY_CHUNKS}:
             return False
         if len(nt) <= 1:
             return False
@@ -180,60 +197,115 @@ class DynamicSearch:
         has_katakana_or_latin = bool(re.search(r"[A-Za-zァ-ヴｦ-ﾟ]", term))
         has_critical = any(normalize(t) in nt for t in CRITICAL_TERMS)
 
+        # Japanese sentence-like chunks are usually bad, e.g. 今日はペヤング何個食べるの
         if len(nt) >= 7 and not has_katakana_or_latin and not has_critical:
             return False
 
-        if re.search(r"(から|ので|なら|して|した|れる|られる|たい|来い|何に|使う|作って|遅れる)", term):
+        if re.search(r"(から|ので|なら|して|した|れる|られる|たい|来い|何に|何個|使う|作って|食べる|遅れる)", term):
             if not has_katakana_or_latin and not has_critical:
                 return False
 
         return True
 
-    def search(self, user_text: str):
-        terms, predicates = self.extract_terms(user_text)
-        norm_terms = [(t, normalize(t), "term") for t in terms if normalize(t)]
-        norm_preds = [(t, normalize(t), "predicate") for t in predicates if normalize(t)]
+    def _is_topic_term(self, term: str):
+        t = term or ""
+        nt = normalize(t)
+        if not nt:
+            return False
+        if nt in {normalize(x) for x in GENERIC_TERMS}:
+            return False
+        if KATAKANA_RE.fullmatch(t):
+            return True
+        if ALNUM_RE.fullmatch(t):
+            return True
+        if any(normalize(c) == nt for c in CRITICAL_TERMS):
+            return True
+        # 2+ kanji names/places can be topic, but avoid broad temporal/count words
+        if re.search(r"(何個|何回|何人|何枚|何時|食|飲|使|作|行|来|見る|買)", t):
+            return False
+        if KANJI_RE.fullmatch(t) and nt not in {normalize(x) for x in ["今日", "明日", "昨日", "何個", "何回"]}:
+            return True
+        return False
 
-        queries = norm_terms + norm_preds
+    def _score_message(self, i: int, m: dict, queries: list[tuple[str, str, str]], topic_mode: bool):
+        ntext = m.get("n", "")
+        if not ntext:
+            return None
+
+        score = 0
+        matched = []
+        has_topic_match = False
+
+        for orig, nt, kind in queries:
+            if nt in ntext:
+                l = len(nt)
+                if kind == "topic":
+                    score += l * l + 120
+                    has_topic_match = True
+                elif kind == "term":
+                    score += l * l + 18
+                else:
+                    score += max(12, l * 6)
+                matched.append(f"{orig}" if kind != "predicate" else f"{orig}*")
+
+        if score <= 0:
+            return None
+
+        # If topic mode is active, ignore hits that do not match the topic.
+        if topic_mode and not has_topic_match:
+            return None
+
+        if m.get("p"):
+            score += 500
+        if i + 1 < len(self.messages) and self.messages[i + 1].get("p"):
+            score += 450
+        if i + 2 < len(self.messages) and self.messages[i + 2].get("p"):
+            score += 250
+        if i + 3 < len(self.messages) and self.messages[i + 3].get("p"):
+            score += 150
+
+        if score < self.min_score:
+            return None
+
+        return {"i": i, "score": score, "matched": matched[:10], "speaker": m.get("s"), "text": m.get("x"), "has_topic": has_topic_match}
+
+    def _run_search(self, queries, topic_mode: bool):
         hits = []
-        if not queries:
-            return {"terms": [], "predicates": [], "hits": [], "episodes": [], "style": self.sample_style([])}
-
         for i, m in enumerate(self.messages):
-            ntext = m.get("n", "")
-            if not ntext:
-                continue
-
-            score = 0
-            matched = []
-            for orig, nt, kind in queries:
-                if nt in ntext:
-                    l = len(nt)
-                    if kind == "term":
-                        score += l * l + 22
-                    else:
-                        score += max(18, l * 8)
-                    matched.append(f"{orig}" if kind == "term" else f"{orig}*")
-
-            if score <= 0:
-                continue
-
-            if m.get("p"):
-                score += 500
-            if i + 1 < len(self.messages) and self.messages[i + 1].get("p"):
-                score += 450
-            if i + 2 < len(self.messages) and self.messages[i + 2].get("p"):
-                score += 250
-
-            # Predicate-only hit should be weaker unless persona proximity exists.
-            if not norm_terms and score < 550:
-                score -= 40
-
-            if score >= self.min_score:
-                hits.append({"i": i, "score": score, "matched": matched[:10], "speaker": m.get("s"), "text": m.get("x")})
-
+            h = self._score_message(i, m, queries, topic_mode=topic_mode)
+            if h:
+                hits.append(h)
         hits.sort(key=lambda h: h["score"], reverse=True)
-        hits = hits[:self.max_hits]
+        return hits[:self.max_hits]
+
+    def search(self, user_text: str):
+        terms, predicates, topic_terms, generic_terms = self.extract_terms(user_text)
+
+        topic_queries = [(t, normalize(t), "topic") for t in topic_terms if normalize(t)]
+        generic_queries = [(t, normalize(t), "term") for t in generic_terms if normalize(t)]
+        pred_queries = [(t, normalize(t), "predicate") for t in predicates if normalize(t)]
+
+        if not topic_queries and not generic_queries and not pred_queries:
+            return {
+                "terms": [], "predicates": [], "topic_terms": [], "generic_terms": [],
+                "hits": [], "episodes": [], "style": self.sample_style([]),
+                "search_mode": "empty",
+            }
+
+        # Topic-first:
+        # 1) If concrete topic exists, search only topic terms first.
+        # 2) If no topic hits, fallback to generic/predicate.
+        search_mode = "topic_first" if topic_queries else "general"
+        hits = []
+
+        if topic_queries:
+            hits = self._run_search(topic_queries, topic_mode=True)
+            if not hits:
+                # fallback, but log it explicitly
+                search_mode = "topic_miss_fallback_general"
+                hits = self._run_search(topic_queries + generic_queries + pred_queries, topic_mode=False)
+        else:
+            hits = self._run_search(generic_queries + pred_queries, topic_mode=False)
 
         episodes = []
         seen_ranges = set()
@@ -250,7 +322,16 @@ class DynamicSearch:
                 break
 
         style = self.sample_style(episodes)
-        return {"terms": terms, "predicates": predicates, "hits": hits, "episodes": episodes, "style": style}
+        return {
+            "terms": terms,
+            "predicates": predicates,
+            "topic_terms": topic_terms,
+            "generic_terms": generic_terms,
+            "hits": hits,
+            "episodes": episodes,
+            "style": style,
+            "search_mode": search_mode,
+        }
 
     def sample_style(self, episodes):
         lines = []
@@ -282,10 +363,10 @@ class DynamicSearch:
             sp = m.get("s", "")
             role = "橋本新" if sp in PERSONA_SPEAKERS else sp
             line = f"{role}: {tx}"
-            if len(line) > 90:
-                line = line[:90] + "…"
+            if len(line) > 120:
+                line = line[:120] + "…"
             lines.append(line)
-            if sp in PERSONA_SPEAKERS and 2 <= len(tx.strip()) <= 100:
+            if sp in PERSONA_SPEAKERS and 2 <= len(tx.strip()) <= 120:
                 persona_lines.append(tx.strip())
 
         if not lines:
@@ -296,6 +377,7 @@ class DynamicSearch:
             "end": end,
             "score": hit["score"],
             "matched": hit["matched"],
+            "has_topic": hit.get("has_topic", False),
             "window": "\n".join(lines)[-900:],
             "persona": " / ".join(persona_lines[:4])[:260],
             "persona_lines": persona_lines[:8],

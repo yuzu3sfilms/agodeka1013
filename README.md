@@ -466,3 +466,134 @@ CONTINUITY_REPLY_PROBABILITY=0.75
 ペヤング/牛角/二郎/ニッパーのような固有話題を必ず再生候補に残す
 過去ログを設定として反応に使う
 ```
+
+
+---
+
+# v12.4 topic search fix
+
+## 問題
+
+Renderログでこうなっていた。
+
+```text
+received: 今日はペヤング何個食べるの？
+terms=['今日はペヤング何個食べるの', 'ペヤング', '何個食', '今日']
+candidate_hits=10
+top_rejected=[{'matched': ['今日']} ...]
+selected_episodes=0
+```
+
+これは最悪で、検索が「ペヤング」ではなく「今日」で埋まっていた。
+
+つまり、
+
+```text
+ペヤング = 本題
+今日 = ノイズ
+```
+
+なのに、ノイズで検索していた。
+
+## v12.4の修正
+
+### 1. topic-first search
+
+検索語を分ける。
+
+```text
+topic_terms  = 本題語
+generic_terms = ノイズ寄り語
+predicates = 述語
+```
+
+例:
+
+```text
+今日はペヤング何個食べるの？
+```
+
+はこうなる。
+
+```text
+topic_terms=['ペヤング']
+generic_terms=['今日はペヤング何個食べるの', '何個食', '今日']
+predicates=['何個食べる', '何個食べ', ...]
+```
+
+### 2. topic termがある時はtopicだけで先に検索
+
+```text
+topic_termsがある
+↓
+topic_termsだけで検索
+↓
+1件でも出たらgeneric_termsは使わない
+```
+
+これで「今日」や「何個」でヒット欄が埋まらない。
+
+### 3. topicが0件の時だけfallback
+
+```text
+topic_termsで0件
+↓
+topic_miss_fallback_general
+↓
+generic/predicateも使う
+```
+
+### 4. ログ強化
+
+v12.4からこう出る。
+
+```text
+topic_terms=['ペヤング']
+generic_terms=['今日はペヤング何個食べるの', '何個食', '今日']
+search_mode=topic_first
+```
+
+これで検索の主役が何か分かる。
+
+## ローカル検証
+
+```text
+query: 今日はペヤング何個食べるの？
+topic_terms=['ペヤング']
+search_mode=topic_first
+candidate_hits=5
+candidate_episodes=5
+selected_episodes=2
+relevance_scores=[144, 122]
+```
+
+拾えたエピソード例:
+
+```text
+ペヤング25個食べてる途中なんでしょ
+ペヤング50個食べれそう
+```
+
+## 推奨環境変数
+
+```text
+MAX_SEARCH_HITS=12
+MAX_EPISODE_WINDOWS=6
+EPISODE_WINDOW_BEFORE=4
+EPISODE_WINDOW_AFTER=6
+MIN_SEARCH_SCORE=35
+MAX_TOKENS=90
+
+CONTINUITY_SECONDS=420
+CONTINUITY_MIN_HISTORY=1
+CONTINUITY_REPLY_PROBABILITY=0.75
+```
+
+## 方針
+
+```text
+本題語を外さない
+ノイズ語で候補を埋めない
+エピソード検索はまずtopic-first
+topicが拾えたらgenericは使わない
+```

@@ -118,6 +118,7 @@ class HashimotoArataBot:
         relation_block = self.relationships.format()
         relation_style = "\n".join(f"- {x}" for x in self.relationships.style_samples(6))
         terms = ", ".join(search_result.get("terms", [])[:8])
+        topic_terms = ", ".join(search_result.get("topic_terms", [])[:8])
         predicates = ", ".join(search_result.get("predicates", [])[:8])
         rel = ", ".join(str(x) for x in search_result.get("relevance_scores", []))
         reasons = str(search_result.get("relevance_reasons", []))[:300]
@@ -145,6 +146,7 @@ class HashimotoArataBot:
         user = f"""mode:{'Q' if question else 'react'}
 発言:{user_text}
 語:{terms}
+本題語:{topic_terms}
 述語:{predicates}
 関連度:{rel}
 採用理由:{reasons}
@@ -181,7 +183,10 @@ class HashimotoArataBot:
         print(
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
+            f"topic_terms={result.get('topic_terms', [])[:12]}",
+            f"generic_terms={result.get('generic_terms', [])[:12]}",
             f"predicates={result.get('predicates', [])[:12]}",
+            f"search_mode={result.get('search_mode', '')}",
             f"candidate_hits={len(result.get('hits', []))}",
             f"candidate_episodes={len(result.get('candidate_episodes', []))}",
             f"selected_episodes={len(result.get('episodes', []))}",
@@ -239,9 +244,9 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v12_3_continuity_fallback", flush=True)
+                    print("generation path: groq_v12_4_continuity_fallback", flush=True)
                 else:
-                    print("generation path: groq_v12_3_episode_canon", flush=True)
+                    print("generation path: groq_v12_4_topic_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)
