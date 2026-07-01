@@ -1,0 +1,1494 @@
+{
+  "version": "v13_global_persona_profile",
+  "n_persona_lines": 5546,
+  "length": {
+    "mean": 14.314821492967905,
+    "median": 10.0,
+    "p25": 6,
+    "p75": 18,
+    "short_le_8_rate": 0.3999278759466282,
+    "very_short_le_4_rate": 0.16931121529029933
+  },
+  "question_rate": 0.10926794085827624,
+  "exclaim_rate": 0.03750450775333574,
+  "first_person_counts": {
+    "私": 7,
+    "俺": 5,
+    "自分": 112,
+    "ぼく": 72,
+    "僕": 125
+  },
+  "common_endings": [
+    {
+      "ending": "す。",
+      "count": 470
+    },
+    {
+      "ending": "[写真]",
+      "count": 342
+    },
+    {
+      "ending": "写真]",
+      "count": 342
+    },
+    {
+      "ending": "真]",
+      "count": 342
+    },
+    {
+      "ending": "です。",
+      "count": 291
+    },
+    {
+      "ending": "ね。",
+      "count": 242
+    },
+    {
+      "ending": "ます",
+      "count": 183
+    },
+    {
+      "ending": "た。",
+      "count": 182
+    },
+    {
+      "ending": "です",
+      "count": 179
+    },
+    {
+      "ending": "ます。",
+      "count": 161
+    },
+    {
+      "ending": "か？",
+      "count": 156
+    },
+    {
+      "ending": "すか？",
+      "count": 152
+    },
+    {
+      "ending": "した。",
+      "count": 150
+    },
+    {
+      "ending": "いです。",
+      "count": 134
+    },
+    {
+      "ending": "ました。",
+      "count": 134
+    },
+    {
+      "ending": "い。",
+      "count": 128
+    },
+    {
+      "ending": "ですか？",
+      "count": 124
+    },
+    {
+      "ending": "すね。",
+      "count": 118
+    },
+    {
+      "ending": "タンプ]",
+      "count": 102
+    },
+    {
+      "ending": "ンプ]",
+      "count": 102
+    },
+    {
+      "ending": "プ]",
+      "count": 102
+    },
+    {
+      "ending": "…。",
+      "count": 99
+    },
+    {
+      "ending": "すね",
+      "count": 96
+    },
+    {
+      "ending": "した",
+      "count": 88
+    },
+    {
+      "ending": "せん",
+      "count": 88
+    },
+    {
+      "ending": "ません",
+      "count": 87
+    },
+    {
+      "ending": "ですね",
+      "count": 82
+    },
+    {
+      "ending": "ですね。",
+      "count": 80
+    },
+    {
+      "ending": "ました",
+      "count": 73
+    },
+    {
+      "ending": "います",
+      "count": 69
+    },
+    {
+      "ending": "いです",
+      "count": 66
+    },
+    {
+      "ending": "ん。",
+      "count": 62
+    },
+    {
+      "ending": "か?",
+      "count": 58
+    },
+    {
+      "ending": "すか?",
+      "count": 57
+    },
+    {
+      "ending": "ざいます",
+      "count": 55
+    },
+    {
+      "ending": "みません",
+      "count": 55
+    },
+    {
+      "ending": "よ。",
+      "count": 53
+    },
+    {
+      "ending": "ですか?",
+      "count": 48
+    },
+    {
+      "ending": "います。",
+      "count": 45
+    },
+    {
+      "ending": "よね。",
+      "count": 45
+    },
+    {
+      "ending": "る。",
+      "count": 44
+    },
+    {
+      "ending": "の？",
+      "count": 43
+    },
+    {
+      "ending": "ません。",
+      "count": 43
+    },
+    {
+      "ending": "せん。",
+      "count": 43
+    },
+    {
+      "ending": "はい",
+      "count": 42
+    },
+    {
+      "ending": "ない。",
+      "count": 42
+    },
+    {
+      "ending": "！！",
+      "count": 40
+    },
+    {
+      "ending": "あはい",
+      "count": 40
+    },
+    {
+      "ending": "ない",
+      "count": 39
+    },
+    {
+      "ending": "よね",
+      "count": 38
+    },
+    {
+      "ending": "かね",
+      "count": 37
+    },
+    {
+      "ending": "すかね",
+      "count": 36
+    },
+    {
+      "ending": "きゃっ",
+      "count": 35
+    },
+    {
+      "ending": "すか",
+      "count": 34
+    },
+    {
+      "ending": "すよ",
+      "count": 34
+    },
+    {
+      "ending": "！？",
+      "count": 34
+    },
+    {
+      "ending": "？？",
+      "count": 34
+    },
+    {
+      "ending": "いですね",
+      "count": 33
+    },
+    {
+      "ending": "すよね。",
+      "count": 33
+    },
+    {
+      "ending": "ですかね",
+      "count": 33
+    },
+    {
+      "ending": "ります。",
+      "count": 32
+    },
+    {
+      "ending": "さい",
+      "count": 30
+    },
+    {
+      "ending": "(涙)",
+      "count": 30
+    },
+    {
+      "ending": "涙)",
+      "count": 30
+    },
+    {
+      "ending": "すよ。",
+      "count": 30
+    },
+    {
+      "ending": "う。",
+      "count": 28
+    },
+    {
+      "ending": "ださい。",
+      "count": 28
+    },
+    {
+      "ending": "さい。",
+      "count": 28
+    },
+    {
+      "ending": "ですか",
+      "count": 27
+    },
+    {
+      "ending": "きました",
+      "count": 27
+    },
+    {
+      "ending": "きます",
+      "count": 27
+    },
+    {
+      "ending": "すよね",
+      "count": 26
+    },
+    {
+      "ending": "ますね。",
+      "count": 26
+    },
+    {
+      "ending": "す…",
+      "count": 26
+    },
+    {
+      "ending": "ですよね",
+      "count": 25
+    },
+    {
+      "ending": "ください",
+      "count": 24
+    },
+    {
+      "ending": "ださい",
+      "count": 24
+    },
+    {
+      "ending": "ますか？",
+      "count": 23
+    },
+    {
+      "ending": "ります",
+      "count": 22
+    },
+    {
+      "ending": "は？",
+      "count": 22
+    }
+  ],
+  "common_lines": [
+    {
+      "text": "[写真]",
+      "count": 342
+    },
+    {
+      "text": "[スタンプ]",
+      "count": 102
+    },
+    {
+      "text": "すみません",
+      "count": 43
+    },
+    {
+      "text": "グループ通話が終了しました。",
+      "count": 33
+    },
+    {
+      "text": "ありがとうございます",
+      "count": 22
+    },
+    {
+      "text": "あはい",
+      "count": 20
+    },
+    {
+      "text": "きゃっ",
+      "count": 17
+    },
+    {
+      "text": "おめでとうございます",
+      "count": 15
+    },
+    {
+      "text": "はい",
+      "count": 11
+    },
+    {
+      "text": "[動画]",
+      "count": 9
+    },
+    {
+      "text": "？",
+      "count": 8
+    },
+    {
+      "text": "きゃぴい",
+      "count": 8
+    },
+    {
+      "text": "肖像画",
+      "count": 8
+    },
+    {
+      "text": "↑",
+      "count": 8
+    },
+    {
+      "text": "着きました",
+      "count": 7
+    },
+    {
+      "text": "きゃぴ",
+      "count": 7
+    },
+    {
+      "text": "あはい。",
+      "count": 6
+    },
+    {
+      "text": "素晴らしいです。",
+      "count": 6
+    },
+    {
+      "text": "😢",
+      "count": 6
+    },
+    {
+      "text": "(lying)",
+      "count": 6
+    },
+    {
+      "text": "うん",
+      "count": 5
+    },
+    {
+      "text": "爆笑しました。",
+      "count": 5
+    },
+    {
+      "text": "Liveが終了しました。",
+      "count": 5
+    },
+    {
+      "text": "すみません。",
+      "count": 5
+    },
+    {
+      "text": "グループ音声通話が開始されました。",
+      "count": 5
+    },
+    {
+      "text": "塩田さん？",
+      "count": 5
+    },
+    {
+      "text": "よ",
+      "count": 5
+    },
+    {
+      "text": "?",
+      "count": 5
+    },
+    {
+      "text": "きゃっ(きゃっ)",
+      "count": 5
+    },
+    {
+      "text": "美味しいよ！",
+      "count": 5
+    },
+    {
+      "text": "本当にやったんすか？",
+      "count": 5
+    },
+    {
+      "text": "何時から何時ですか?",
+      "count": 5
+    },
+    {
+      "text": "すみませんつきました",
+      "count": 5
+    },
+    {
+      "text": "うんち",
+      "count": 5
+    },
+    {
+      "text": "どこですか？",
+      "count": 4
+    },
+    {
+      "text": "…。",
+      "count": 4
+    },
+    {
+      "text": "つきました",
+      "count": 4
+    },
+    {
+      "text": "あはい…",
+      "count": 4
+    },
+    {
+      "text": "わかりました",
+      "count": 4
+    },
+    {
+      "text": "素晴らしいです",
+      "count": 4
+    },
+    {
+      "text": "はい。",
+      "count": 4
+    },
+    {
+      "text": "よし！",
+      "count": 4
+    },
+    {
+      "text": "このくらいですか？",
+      "count": 4
+    },
+    {
+      "text": "おめでとう",
+      "count": 4
+    },
+    {
+      "text": "(puking rainbows)",
+      "count": 4
+    },
+    {
+      "text": "もしもし",
+      "count": 3
+    },
+    {
+      "text": "はい…。",
+      "count": 3
+    },
+    {
+      "text": "る",
+      "count": 3
+    },
+    {
+      "text": "何時ですか？",
+      "count": 3
+    },
+    {
+      "text": "ごめん",
+      "count": 3
+    },
+    {
+      "text": "ごめんなさい",
+      "count": 3
+    },
+    {
+      "text": "そうですね",
+      "count": 3
+    },
+    {
+      "text": "😭",
+      "count": 3
+    },
+    {
+      "text": "??",
+      "count": 3
+    },
+    {
+      "text": "そう。",
+      "count": 3
+    },
+    {
+      "text": "きゃっ！",
+      "count": 3
+    },
+    {
+      "text": "きゃぴっ",
+      "count": 3
+    },
+    {
+      "text": "いきなりステーキ",
+      "count": 3
+    },
+    {
+      "text": "ステーキいきなり",
+      "count": 3
+    },
+    {
+      "text": "(手)",
+      "count": 3
+    },
+    {
+      "text": "了解",
+      "count": 2
+    },
+    {
+      "text": "ありがとうございます。",
+      "count": 2
+    },
+    {
+      "text": "ないよ",
+      "count": 2
+    },
+    {
+      "text": "頑張ってます。",
+      "count": 2
+    },
+    {
+      "text": "www",
+      "count": 2
+    },
+    {
+      "text": "ぼくぅ",
+      "count": 2
+    },
+    {
+      "text": "まだ",
+      "count": 2
+    },
+    {
+      "text": "もう家に着きます",
+      "count": 2
+    },
+    {
+      "text": "makotarata",
+      "count": 2
+    },
+    {
+      "text": "くれさん…。",
+      "count": 2
+    },
+    {
+      "text": "ムタ…。",
+      "count": 2
+    },
+    {
+      "text": "ぽきた",
+      "count": 2
+    },
+    {
+      "text": "誤動作です",
+      "count": 2
+    },
+    {
+      "text": "(笑)",
+      "count": 2
+    },
+    {
+      "text": "んー。",
+      "count": 2
+    },
+    {
+      "text": "おめ",
+      "count": 2
+    },
+    {
+      "text": "すみませんね。",
+      "count": 2
+    },
+    {
+      "text": "かっこいい",
+      "count": 2
+    },
+    {
+      "text": "わかりました。",
+      "count": 2
+    },
+    {
+      "text": "そ。",
+      "count": 2
+    }
+  ],
+  "common_terms": [
+    {
+      "term": "写真",
+      "count": 371
+    },
+    {
+      "term": "自分",
+      "count": 109
+    },
+    {
+      "term": "スタンプ",
+      "count": 105
+    },
+    {
+      "term": "塩田",
+      "count": 75
+    },
+    {
+      "term": "筋肉",
+      "count": 58
+    },
+    {
+      "term": "無理",
+      "count": 56
+    },
+    {
+      "term": "ムタ",
+      "count": 51
+    },
+    {
+      "term": "大丈夫",
+      "count": 50
+    },
+    {
+      "term": "トレ",
+      "count": 49
+    },
+    {
+      "term": "グループ",
+      "count": 43
+    },
+    {
+      "term": "終了",
+      "count": 42
+    },
+    {
+      "term": "通話",
+      "count": 33
+    },
+    {
+      "term": "何時",
+      "count": 31
+    },
+    {
+      "term": "トレーニング",
+      "count": 30
+    },
+    {
+      "term": "素晴",
+      "count": 29
+    },
+    {
+      "term": "本当",
+      "count": 28
+    },
+    {
+      "term": "食事",
+      "count": 27
+    },
+    {
+      "term": "小杉湯",
+      "count": 27
+    },
+    {
+      "term": "身体",
+      "count": 25
+    },
+    {
+      "term": "新宿",
+      "count": 25
+    },
+    {
+      "term": "スクワット",
+      "count": 25
+    },
+    {
+      "term": "名前",
+      "count": 22
+    },
+    {
+      "term": "時間",
+      "count": 22
+    },
+    {
+      "term": "アカウント",
+      "count": 21
+    },
+    {
+      "term": "坂口",
+      "count": 20
+    },
+    {
+      "term": "動画",
+      "count": 20
+    },
+    {
+      "term": "富澤",
+      "count": 20
+    },
+    {
+      "term": "ハート",
+      "count": 19
+    },
+    {
+      "term": "ジム",
+      "count": 19
+    },
+    {
+      "term": "セット",
+      "count": 18
+    },
+    {
+      "term": "美味",
+      "count": 18
+    },
+    {
+      "term": "普通",
+      "count": 18
+    },
+    {
+      "term": "マッチョ",
+      "count": 18
+    },
+    {
+      "term": "プロテイン",
+      "count": 17
+    },
+    {
+      "term": "フル",
+      "count": 17
+    },
+    {
+      "term": "最近",
+      "count": 16
+    },
+    {
+      "term": "脂質",
+      "count": 16
+    },
+    {
+      "term": "ゴールドジム",
+      "count": 16
+    },
+    {
+      "term": "間違",
+      "count": 16
+    },
+    {
+      "term": "必要",
+      "count": 15
+    },
+    {
+      "term": "頑張",
+      "count": 15
+    },
+    {
+      "term": "パソコン",
+      "count": 15
+    },
+    {
+      "term": "フォロー",
+      "count": 15
+    },
+    {
+      "term": "東京",
+      "count": 14
+    },
+    {
+      "term": "女性",
+      "count": 14
+    },
+    {
+      "term": "bot",
+      "count": 14
+    },
+    {
+      "term": "背中",
+      "count": 14
+    },
+    {
+      "term": "https",
+      "count": 14
+    },
+    {
+      "term": "二郎",
+      "count": 14
+    },
+    {
+      "term": "実家",
+      "count": 13
+    },
+    {
+      "term": "サラダチキン",
+      "count": 13
+    },
+    {
+      "term": "タンパク",
+      "count": 13
+    },
+    {
+      "term": "体重",
+      "count": 13
+    },
+    {
+      "term": "ダイエット",
+      "count": 12
+    },
+    {
+      "term": "バーベル",
+      "count": 12
+    },
+    {
+      "term": "種目",
+      "count": 12
+    },
+    {
+      "term": "グラム",
+      "count": 12
+    },
+    {
+      "term": "ステーキ",
+      "count": 12
+    },
+    {
+      "term": "最初",
+      "count": 12
+    },
+    {
+      "term": "ライダー",
+      "count": 12
+    },
+    {
+      "term": "高円寺",
+      "count": 12
+    },
+    {
+      "term": "ホモ",
+      "count": 12
+    },
+    {
+      "term": "残念",
+      "count": 11
+    },
+    {
+      "term": "インスタ",
+      "count": 11
+    },
+    {
+      "term": "銭湯",
+      "count": 11
+    },
+    {
+      "term": "レッグプレス",
+      "count": 11
+    },
+    {
+      "term": "増量",
+      "count": 11
+    },
+    {
+      "term": "以外",
+      "count": 10
+    },
+    {
+      "term": "一回",
+      "count": 10
+    },
+    {
+      "term": "爆笑",
+      "count": 10
+    },
+    {
+      "term": "日曜日",
+      "count": 10
+    },
+    {
+      "term": "炭水化物",
+      "count": 10
+    },
+    {
+      "term": "ラーメン",
+      "count": 10
+    },
+    {
+      "term": "減量",
+      "count": 10
+    },
+    {
+      "term": "世界",
+      "count": 10
+    },
+    {
+      "term": "ボディビル",
+      "count": 10
+    },
+    {
+      "term": "ハーフ",
+      "count": 10
+    },
+    {
+      "term": "場所",
+      "count": 9
+    },
+    {
+      "term": "ベンチプレス",
+      "count": 9
+    },
+    {
+      "term": "最高",
+      "count": 9
+    },
+    {
+      "term": "テスト",
+      "count": 9
+    },
+    {
+      "term": "www",
+      "count": 9
+    },
+    {
+      "term": "ビルダー",
+      "count": 9
+    },
+    {
+      "term": "ダウンロード",
+      "count": 9
+    },
+    {
+      "term": "ゲーム",
+      "count": 9
+    },
+    {
+      "term": "表情",
+      "count": 9
+    },
+    {
+      "term": "グランド",
+      "count": 9
+    },
+    {
+      "term": "ムタァ",
+      "count": 9
+    },
+    {
+      "term": "冨澤",
+      "count": 9
+    },
+    {
+      "term": "マシン",
+      "count": 9
+    },
+    {
+      "term": "ベルト",
+      "count": 9
+    },
+    {
+      "term": "フォーム",
+      "count": 9
+    },
+    {
+      "term": "youtu",
+      "count": 9
+    },
+    {
+      "term": "シコ",
+      "count": 9
+    },
+    {
+      "term": "コロナ",
+      "count": 9
+    },
+    {
+      "term": "一人",
+      "count": 8
+    },
+    {
+      "term": "カラオケ",
+      "count": 8
+    },
+    {
+      "term": "何故",
+      "count": 8
+    },
+    {
+      "term": "マジ",
+      "count": 8
+    },
+    {
+      "term": "レイプ",
+      "count": 8
+    },
+    {
+      "term": "多分",
+      "count": 8
+    },
+    {
+      "term": "人間",
+      "count": 8
+    },
+    {
+      "term": "面白",
+      "count": 8
+    },
+    {
+      "term": "仮面",
+      "count": 8
+    },
+    {
+      "term": "風呂",
+      "count": 8
+    },
+    {
+      "term": "場合",
+      "count": 8
+    },
+    {
+      "term": "ウエイト",
+      "count": 8
+    },
+    {
+      "term": "先生",
+      "count": 8
+    },
+    {
+      "term": "サイゼ",
+      "count": 8
+    },
+    {
+      "term": "意味",
+      "count": 8
+    },
+    {
+      "term": "重量",
+      "count": 8
+    },
+    {
+      "term": "肖像画",
+      "count": 8
+    },
+    {
+      "term": "野猿",
+      "count": 8
+    },
+    {
+      "term": "スキー",
+      "count": 7
+    },
+    {
+      "term": "発達",
+      "count": 7
+    },
+    {
+      "term": "全身",
+      "count": 7
+    },
+    {
+      "term": "時半",
+      "count": 7
+    },
+    {
+      "term": "途中",
+      "count": 7
+    },
+    {
+      "term": "誕生日",
+      "count": 7
+    },
+    {
+      "term": "留年",
+      "count": 7
+    },
+    {
+      "term": "可能性",
+      "count": 7
+    },
+    {
+      "term": "学校",
+      "count": 7
+    },
+    {
+      "term": "イメージ",
+      "count": 7
+    },
+    {
+      "term": "wwww",
+      "count": 7
+    },
+    {
+      "term": "今年",
+      "count": 7
+    },
+    {
+      "term": "理由",
+      "count": 7
+    },
+    {
+      "term": "二人",
+      "count": 7
+    },
+    {
+      "term": "摂取",
+      "count": 7
+    },
+    {
+      "term": "野菜",
+      "count": 7
+    },
+    {
+      "term": "土塚",
+      "count": 7
+    },
+    {
+      "term": "デッド",
+      "count": 7
+    },
+    {
+      "term": "変身",
+      "count": 7
+    },
+    {
+      "term": "彼女",
+      "count": 7
+    },
+    {
+      "term": "玩具",
+      "count": 7
+    },
+    {
+      "term": "苦笑",
+      "count": 7
+    },
+    {
+      "term": "大変",
+      "count": 7
+    },
+    {
+      "term": "感染",
+      "count": 7
+    },
+    {
+      "term": "韓国",
+      "count": 7
+    },
+    {
+      "term": "西口",
+      "count": 6
+    },
+    {
+      "term": "デッドリフト",
+      "count": 6
+    },
+    {
+      "term": "簡単",
+      "count": 6
+    },
+    {
+      "term": "函館",
+      "count": 6
+    },
+    {
+      "term": "デカイ",
+      "count": 6
+    },
+    {
+      "term": "平川",
+      "count": 6
+    },
+    {
+      "term": "ポツォ",
+      "count": 6
+    },
+    {
+      "term": "気持",
+      "count": 6
+    },
+    {
+      "term": "レベル",
+      "count": 6
+    },
+    {
+      "term": "ﾎﾟﾂｫ",
+      "count": 6
+    },
+    {
+      "term": "可愛",
+      "count": 6
+    },
+    {
+      "term": "YouTube",
+      "count": 6
+    },
+    {
+      "term": "アニメ",
+      "count": 6
+    },
+    {
+      "term": "パン",
+      "count": 6
+    },
+    {
+      "term": "Live",
+      "count": 6
+    },
+    {
+      "term": "電車",
+      "count": 6
+    },
+    {
+      "term": "男性",
+      "count": 6
+    },
+    {
+      "term": "負荷",
+      "count": 6
+    },
+    {
+      "term": "ﾎﾟｯﾂｫ",
+      "count": 6
+    },
+    {
+      "term": "顎動画",
+      "count": 6
+    },
+    {
+      "term": "必殺技",
+      "count": 6
+    },
+    {
+      "term": "アイコン",
+      "count": 6
+    },
+    {
+      "term": "追加",
+      "count": 6
+    },
+    {
+      "term": "中山拓哉",
+      "count": 6
+    },
+    {
+      "term": "腹筋",
+      "count": 6
+    },
+    {
+      "term": "デザイン",
+      "count": 6
+    },
+    {
+      "term": "選手",
+      "count": 6
+    },
+    {
+      "term": "基本的",
+      "count": 6
+    },
+    {
+      "term": "寿司",
+      "count": 6
+    },
+    {
+      "term": "病院",
+      "count": 6
+    },
+    {
+      "term": "時代",
+      "count": 6
+    },
+    {
+      "term": "個人的",
+      "count": 6
+    },
+    {
+      "term": "lying",
+      "count": 6
+    },
+    {
+      "term": "目的",
+      "count": 5
+    },
+    {
+      "term": "肉体",
+      "count": 5
+    },
+    {
+      "term": "一週間",
+      "count": 5
+    },
+    {
+      "term": "駄目",
+      "count": 5
+    },
+    {
+      "term": "反応",
+      "count": 5
+    },
+    {
+      "term": "目指",
+      "count": 5
+    },
+    {
+      "term": "ミスター",
+      "count": 5
+    },
+    {
+      "term": "日本",
+      "count": 5
+    },
+    {
+      "term": "筋肉量",
+      "count": 5
+    },
+    {
+      "term": "徐々",
+      "count": 5
+    },
+    {
+      "term": "ダメ",
+      "count": 5
+    },
+    {
+      "term": "関係",
+      "count": 5
+    },
+    {
+      "term": "レポート",
+      "count": 5
+    },
+    {
+      "term": "勉強",
+      "count": 5
+    },
+    {
+      "term": "筋肉質",
+      "count": 5
+    },
+    {
+      "term": "普段",
+      "count": 5
+    },
+    {
+      "term": "進級",
+      "count": 5
+    },
+    {
+      "term": "ボット",
+      "count": 5
+    },
+    {
+      "term": "退学",
+      "count": 5
+    },
+    {
+      "term": "南口",
+      "count": 5
+    },
+    {
+      "term": "キャラ",
+      "count": 5
+    },
+    {
+      "term": "プレゼント",
+      "count": 5
+    },
+    {
+      "term": "理想",
+      "count": 5
+    },
+    {
+      "term": "キロカロリー",
+      "count": 5
+    },
+    {
+      "term": "エネルギー",
+      "count": 5
+    },
+    {
+      "term": "夕方",
+      "count": 5
+    },
+    {
+      "term": "消費",
+      "count": 5
+    },
+    {
+      "term": "スープ",
+      "count": 5
+    },
+    {
+      "term": "バー",
+      "count": 5
+    }
+  ],
+  "forbidden_strong": [
+    "私は",
+    "わたしは",
+    "俺は",
+    "おれは",
+    "AIとして",
+    "私はAI",
+    "だぜ",
+    "ないよ",
+    "だよ",
+    "よな",
+    "だよな",
+    "だよね",
+    "なんだよね",
+    "ですね",
+    "です",
+    "ます",
+    "ください",
+    "と思います"
+  ],
+  "preferred_style": {
+    "short": true,
+    "omit_subject": true,
+    "avoid_explanation": true,
+    "canon_first": true,
+    "one_sentence": true
+  }
+}
