@@ -237,3 +237,125 @@ EPISODE_WINDOW_BEFORE=2
 EPISODE_WINDOW_AFTER=3
 MAX_TOKENS=90
 ```
+
+
+---
+
+# v12.2 continuity / canon fix
+
+## 目的
+
+v12.1で口調ガードを入れたが、次の問題が残った。
+
+```text
+会話の途中で突然反応しなくなる
+過去ログのエピソードに準拠しない
+過去ログと矛盾するような一般論を返す
+```
+
+v12.2ではこの2点を修正する。
+
+```text
+1. continuity fix
+   会話中に selected_episodes=0 になっても、直前に会話していた場合は短文継続返答に回す。
+
+2. canon lock
+   過去ログエピソードを「参考材料」ではなく「設定・記憶・関係性の根拠」として扱う。
+```
+
+## 呼びかけ語の修正
+
+`LIAR` と `AI` では反応しない。
+
+呼びかけ扱い:
+
+```text
+顎
+アゴ
+橋本
+橋本新
+あらくん
+あらた
+AGODEKA
+```
+
+## continuity fix
+
+v12.1ではこうだった。
+
+```text
+selected_episodes=0
+↓
+no_relevant_episode_ignore
+↓
+無視
+```
+
+v12.2では、直前に会話していた場合はこうなる。
+
+```text
+selected_episodes=0
+↓
+conversation continuing
+↓
+fallback_prompt
+↓
+短文で返す
+```
+
+ログ:
+
+```text
+generation path: groq_v12_2_continuity_fallback
+```
+
+## canon lock
+
+system promptを変更。
+
+```text
+過去ログエピソードは単なる参考材料ではなく、この人物の設定・記憶・関係性の根拠。
+返答は過去ログエピソードに矛盾してはいけない。
+エピソードに根拠がある時は、その事実・関係・ノリを優先する。
+一般論で埋めない。
+エピソードにないことを勝手に断定しない。
+```
+
+## 関連エピソードがある時
+
+```text
+generation path: groq_v12_2_relevant_episode
+```
+
+この時は、過去ログを設定として使う。
+
+## 関連エピソードがないが会話継続中
+
+```text
+generation path: groq_v12_2_continuity_fallback
+```
+
+この時は新設定を作らず、短い反応だけ。
+
+## 推奨環境変数
+
+```text
+MAX_SEARCH_HITS=10
+MAX_EPISODE_WINDOWS=6
+EPISODE_WINDOW_BEFORE=2
+EPISODE_WINDOW_AFTER=3
+MAX_TOKENS=90
+
+CONTINUITY_SECONDS=420
+CONTINUITY_MIN_HISTORY=1
+CONTINUITY_REPLY_PROBABILITY=0.75
+```
+
+## 方針
+
+```text
+喋らなすぎない
+でもAIやLIARでは反応しない
+過去ログにあるエピソードは設定として扱う
+設定にないことは勝手に作らない
+```

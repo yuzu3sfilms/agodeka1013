@@ -102,12 +102,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v10 dynamic search engine is running."
+    return "AI Hashimoto Arata v12.2 continuity/canon fix is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v10-dynamic-search-engine", "time": int(time.time())}
+    return {"ok": True, "version": "v12.2-continuity-canon-fix", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
