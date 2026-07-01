@@ -102,12 +102,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v13 global persona judge is running."
+    return "AI Hashimoto Arata v13.1 persona judge init fix is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v13-global-persona-judge", "time": int(time.time())}
+    return {"ok": True, "version": "v13.1-persona-judge-init-fix", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])

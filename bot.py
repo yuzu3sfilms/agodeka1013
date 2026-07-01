@@ -10,6 +10,7 @@ from relationship import RelationshipProfile
 from relevance import RelevanceRanker
 from style_guard import guard_reply
 from canon_answer import CanonAnswer
+from persona_judge import PersonaJudge
 from utils import clean_reply, normalize, de_ai_tone
 
 
@@ -35,12 +36,22 @@ class HashimotoArataBot:
         self.relationships = RelationshipProfile()
         self.ranker = RelevanceRanker()
         self.canon_answer = CanonAnswer()
+        self.persona_judge = PersonaJudge()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
         self.continuity_seconds = int(os.environ.get("CONTINUITY_SECONDS", "420"))
         self.continuity_min_history = int(os.environ.get("CONTINUITY_MIN_HISTORY", "1"))
         self.continuity_probability = float(os.environ.get("CONTINUITY_REPLY_PROBABILITY", "0.75"))
+
+        print(
+            "bot_init:",
+            "version=v13.1",
+            f"persona_judge={hasattr(self, 'persona_judge')}",
+            f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
+            f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
+            flush=True,
+        )
 
     def remember_user(self, chat_id: str, text: str):
         self.histories[chat_id].append(text)

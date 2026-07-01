@@ -881,3 +881,63 @@ LLMの一発回答を信用しない
 橋本全発言から見て乖離が少ない返答だけ採用する
 過去ログを設定として扱う
 ```
+
+
+---
+
+# v13.1 persona judge init fix
+
+## 修正内容
+
+v13で `persona_judge.py` を追加したが、`bot.py` の初期化に抜けがあった。
+
+発生ログ:
+
+```text
+Groq error: AttributeError("'HashimotoArataBot' object has no attribute 'persona_judge'")
+generation path: groq_exception_capyi
+reply: ｷｬﾋﾟｨ
+```
+
+原因:
+
+```text
+from persona_judge import PersonaJudge
+```
+
+と
+
+```text
+self.persona_judge = PersonaJudge()
+```
+
+が `bot.py` に入っていなかった。
+
+## v13.1で入れた修正
+
+```text
+from persona_judge import PersonaJudge
+self.persona_judge = PersonaJudge()
+```
+
+を追加。
+
+さらに起動時ログを追加。
+
+```text
+bot_init: version=v13.1 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True
+```
+
+これが出れば、v13の人格判定器は起動している。
+
+## 期待されるログ
+
+`ペヤング` だけ送った時:
+
+```text
+persona_candidates: [...]
+persona_judge: {'chosen': ..., 'scored': [...]}
+generation path: groq_v13_judged_episode
+```
+
+AttributeErrorは出ない。

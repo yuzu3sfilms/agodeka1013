@@ -1,41 +1,14 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v13_global_persona_judge",
-  "base": "AI_HASHIMOTO_ARATA_v12_5_canon_answer_fix",
-  "purpose": "Move beyond patch-by-patch fixes by judging generated candidates against a global persona profile built from all Hashimoto utterances.",
-  "persona_profile": {
-    "n_persona_lines": 5546,
-    "median_length": 10,
-    "short_le_8_rate": 0.3999278759466282,
-    "very_short_le_4_rate": 0.16931121529029933,
-    "first_person_counts": {
-      "私": 7,
-      "俺": 5,
-      "自分": 112,
-      "ぼく": 72,
-      "僕": 125
-    }
-  },
-  "local_judge_test": {
-    "query": "今日はペヤング何個食べるの？",
-    "candidates": [
-      "ペヤング25個食べる予定だ",
-      "25個の途中",
-      "坂口が言った通り、25個かな",
-      "25個食べました",
-      "すみませんわかりません"
-    ],
-    "chosen": "25個の途中"
-  },
+  "version": "AI_HASHIMOTO_ARATA_v13_1_persona_judge_init_fix",
+  "base": "AI_HASHIMOTO_ARATA_v13_global_persona_judge",
+  "critical_fix": "bot.py now imports and initializes PersonaJudge.",
   "fixes": [
-    "Add persona_judge.py",
-    "Generate hashimoto_persona_profile.json from all persona utterances",
-    "Generate topic_canon_profile.json from corpus windows",
-    "Change Groq generation to produce multiple candidates",
-    "Judge candidates against global persona profile and episode canon",
-    "Reject tense invention and explanatory AI-like answers",
-    "Keep canon_answer deterministic path before Groq",
-    "Keep v12.4 topic-first search"
+    "Add from persona_judge import PersonaJudge to bot.py",
+    "Add self.persona_judge = PersonaJudge() in HashimotoArataBot.__init__",
+    "Add bot_init diagnostic log for persona_judge/profile/topic_canon",
+    "Update app health/version strings"
   ],
+  "expected_startup_log": "bot_init: version=v13.1 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True",
   "files": [
     "Procfile",
     "README.md",
