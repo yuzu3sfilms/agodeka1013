@@ -7,7 +7,7 @@ from query_intent import intent_profile
 
 CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA"]
 STOP_TERMS = ["もういい", "黙って", "だまって", "終わり", "終了", "関係ない", "別の話", "停止"]
-ATTENTION_ONLY_TERMS = {"ねえ", "ねぇ", "ちょっと", "おい", "あの", "なあ", "なぁ"}
+ATTENTION_ONLY_TERMS = {"ねえ", "ねぇ", "ちょっと", "おい", "あの", "うん", "はい", "なるほど", "ふむ", "なあ", "なぁ", "うん", "はい", "なるほど", "ふむ"}
 
 QUESTION_RE = re.compile(r"[？?]|何|なに|誰|だれ|どこ|いつ|なんで|なぜ|どう|何個|何人|何枚|何回|いくつ")
 COUNT_RE = re.compile(r"何個|何人|何枚|何回|いくつ|何本|何杯")
@@ -23,7 +23,7 @@ def extract_topic_terms(text: str):
     )
     bad = {
         "今日", "明日", "昨日", "これ", "それ", "あれ", "する", "した", "して", "いる", "ある", "ない",
-        "何個", "何回", "何人", "何枚", "できる", "食べる", "食べれる", "どう", "なんで", "ねえ", "ねぇ", "ちょっと", "おい", "あの",
+        "何個", "何回", "何人", "何枚", "できる", "食べる", "食べれる", "どう", "なんで", "ねえ", "ねぇ", "ちょっと", "おい", "あの", "うん", "はい", "なるほど", "ふむ",
     }
     out = []
     for t in toks:
@@ -34,7 +34,7 @@ def extract_topic_terms(text: str):
 
 class CurrentStateEngine:
     """
-    v14.5:
+    v14.7:
     Understand current LINE conversation state before retrieval.
 
     This does not try to be a full human mind-reader.

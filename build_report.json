@@ -1,40 +1,37 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v14_6_training_advisor",
-  "base": "AI_HASHIMOTO_ARATA_v14_5_general_query_intent_ranker",
-  "type": "v14-practical-feature-upgrade",
-  "new_files": [
-    "training_intent.py",
-    "training_safety.py",
-    "training_memory.py",
-    "training_advisor.py"
-  ],
-  "main_changes": [
-    "Adds workout/training-advice route before inside-joke scene search",
-    "Classifies training intents including program_request, log_workout, pain_or_injury, nutrition_cut, hypertrophy, form_advice",
-    "Adds lightweight in-memory workout log",
-    "Adds safety handling for pain, extreme dieting, overtraining, and drug/hormone-related prompts",
-    "Keeps normal AIあらくん scene replay unchanged for non-training messages"
+  "version": "AI_HASHIMOTO_ARATA_v14_7_training_context_fix",
+  "base": "AI_HASHIMOTO_ARATA_v14_6_training_advisor",
+  "type": "v14-training-bugfix",
+  "fixes": [
+    "Questions such as １セット何回？ are no longer classified as workout logs",
+    "Question detection now happens before log detection in training_intent.py",
+    "Adds per-chat training context with 600 second TTL",
+    "Follow-ups such as ？ / うん / はい can stay inside training context",
+    "Acknowledgement fillers are added to attention-only terms to reduce accidental scene replay inheritance"
   ],
   "local_tests": {
-    "今日胸": "training_program",
+    "１セット何回？": "training_rep_scheme",
+    "１セット何回やればいいの？": "training_rep_scheme",
+    "？ after rep question": "training_followup",
+    "うん after training": "training_followup",
+    "はい after training": "training_followup",
     "ベンチ 60kg 10回 3セットやった": "training_log",
-    "筋肉痛あるけど脚やっていい？": "training_pain",
-    "ステロイド使えば早い？": "training_safety",
     "グランド土塚": "not_training -> normal scene replay"
   },
-  "expected_startup_log": "bot_init: version=v14.6 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True",
+  "expected_startup_log": "bot_init: version=v14.7 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True",
   "expected_training_paths": [
-    "generation path: training_v14_6_training_program",
-    "generation path: training_v14_6_training_log",
-    "generation path: training_v14_6_training_pain",
-    "generation path: training_v14_6_training_safety",
-    "generation path: training_v14_6_training_nutrition"
+    "generation path: training_v14_7_training_rep_scheme",
+    "generation path: training_v14_7_training_followup",
+    "generation path: training_v14_7_training_log",
+    "generation path: training_v14_7_training_pain",
+    "generation path: training_v14_7_training_safety",
+    "generation path: training_v14_7_training_program"
   ],
   "expected_normal_paths": [
-    "generation path: replay_v14_6_intent_ranked_scene_reply",
-    "generation path: canon_v14_6_policy_answer",
-    "generation path: groq_v14_6_policy_fallback_episode",
-    "generation path: groq_v14_6_policy_fallback_continuity"
+    "generation path: replay_v14_7_intent_ranked_scene_reply",
+    "generation path: canon_v14_7_policy_answer",
+    "generation path: groq_v14_7_policy_fallback_episode",
+    "generation path: groq_v14_7_policy_fallback_continuity"
   ],
   "scene_stats": {
     "n_messages": 108530,

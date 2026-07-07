@@ -37,11 +37,17 @@ def contains_training_intent(text: str) -> bool:
     return False
 
 
-def classify_training_intent(text: str):
+def classify_training_intent(text: str, last_training_context: dict | None = None):
     t = text or ""
     low = t.lower()
+    stripped = t.strip()
+    last_training_context = last_training_context or {}
 
-    if not contains_training_intent(t):
+    question_like = bool(re.search(r"[？?]|何回|なんかい|何レップ|何セット|どう|やれば|すれば|いいの|いい？|よい？", t))
+    followup_only = stripped in {"？", "?", "うん", "はい", "なるほど", "ふむ", "ほう", "で", "それで", "続き"}
+    in_training_context = bool(last_training_context)
+
+    if not contains_training_intent(t) and not (in_training_context and (question_like or followup_only)):
         return {"is_training": False, "intent": "none", "parts": [], "is_log": False}
 
     parts = []
@@ -49,12 +55,37 @@ def classify_training_intent(text: str):
         if any(k in t for k in keys):
             parts.append(part)
 
+    # inherit body part from previous training context
+    if not parts and last_training_context.get("parts"):
+        parts = list(last_training_context.get("parts", []))
+
     is_log = any(re.search(p, t, re.I) for p in LOG_PATTERNS)
 
+    # Safety/pain first.
     if any(k in t for k in ["痛い", "痛み", "筋肉痛", "違和感", "怪我", "ケガ", "腫れ", "しびれ", "痺れ"]):
         intent = "pain_or_injury"
+
+    # Questions must beat log detection.
+    elif question_like:
+        if any(k in t for k in ["何回", "何レップ", "1セット", "１セット", "一セット", "レップ"]):
+            intent = "rep_scheme_question"
+        elif any(k in t for k in ["何セット", "セット"]):
+            intent = "set_scheme_question"
+        elif any(k in t for k in ["減量", "痩せ", "絞", "カロリー", "食事"]):
+            intent = "nutrition_cut"
+        elif any(k in t for k in ["フォーム", "効か", "効いて", "やり方"]):
+            intent = "form_advice"
+        else:
+            intent = "training_followup_question"
+
+    # Short follow-up inside training context.
+    elif in_training_context and followup_only:
+        intent = "training_ack_or_followup"
+
+    # Then logs.
     elif any(k in t for k in ["記録", "メモ", "やった", "完了", "終わった"]) or is_log:
         intent = "log_workout"
+
     elif any(k in t for k in ["メニュー", "何やる", "組んで", "今日", "セット", "レップ"]):
         intent = "program_request"
     elif any(k in t for k in ["減量", "痩せ", "絞", "カロリー", "食事"]):
@@ -70,5 +101,7 @@ def classify_training_intent(text: str):
         "is_training": True,
         "intent": intent,
         "parts": parts,
-        "is_log": is_log,
+        "is_log": is_log and not question_like,
+        "question_like": question_like,
+        "inherited_training_context": in_training_context and not contains_training_intent(t),
     }

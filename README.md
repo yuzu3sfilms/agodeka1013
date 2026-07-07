@@ -650,3 +650,137 @@ generation path: groq_v14_6_policy_fallback_continuity
 グランド土塚
 → not_training, 通常のscene replayへ
 ```
+
+
+---
+
+# v14.7 training context fix
+
+## 修正した問題
+
+v14.6では、以下の問題がありました。
+
+```text
+１セット何回？
+→ training_log と誤判定
+→ 記録しました。になってしまう
+
+１セット何回やればいいの？
+→ training_log と誤判定
+
+？
+→ 筋トレ文脈を継承できず、通常scene replayへ流れる
+
+うん / はい
+→ 前話題を継承して通常scene replayへ流れることがある
+```
+
+## v14.7の修正
+
+### 1. 質問は記録より優先
+
+`training_intent.py` で分類順を変更。
+
+```text
+質問判定
+↓
+記録判定
+```
+
+これにより、
+
+```text
+１セット何回？
+１セット何回やればいいの？
+```
+
+は `log_workout` ではなく、
+
+```text
+rep_scheme_question
+```
+
+になる。
+
+返答例:
+
+```text
+基本は1セット8〜12回くらいでいいです。
+筋肥大狙いなら、フォームを崩さず最後1〜2回きつい重量で、3〜4セット。
+10回を楽に超えるなら少し重量を上げて、6回未満しかできないなら少し下げる感じです。
+```
+
+### 2. training context を追加
+
+`training_advisor.py` に直前の筋トレ文脈を保持する機能を追加。
+
+```text
+last_context[chat_id]
+TTL: 600秒
+```
+
+これで直前が筋トレ相談なら、
+
+```text
+？
+うん
+はい
+```
+
+なども筋トレ文脈として扱える。
+
+### 3. 相槌の通常scene継承を抑制
+
+`bot.py` / `current_state_engine.py` の attention-only 扱いに以下を追加。
+
+```text
+うん
+はい
+なるほど
+ふむ
+```
+
+筋トレ文脈がなければ、これらが不用意に `あらくん` などを継承してscene replayに流れにくくなる。
+
+## 期待する挙動
+
+```text
+１セット何回？
+→ training_v14_7_training_rep_scheme
+
+１セット何回やればいいの？
+→ training_v14_7_training_rep_scheme
+
+？
+→ training_v14_7_training_followup
+
+うん
+→ training_v14_7_training_followup
+
+はい
+→ training_v14_7_training_followup
+
+ベンチ 60kg 10回 3セットやった
+→ training_v14_7_training_log
+
+グランド土塚
+→ not_training
+→ 通常scene replayへ
+```
+
+## 起動ログ
+
+```text
+bot_init: version=v14.7 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True
+```
+
+## generation path
+
+```text
+generation path: training_v14_7_training_rep_scheme
+generation path: training_v14_7_training_followup
+generation path: training_v14_7_training_log
+generation path: training_v14_7_training_pain
+generation path: training_v14_7_training_safety
+generation path: training_v14_7_training_program
+```
