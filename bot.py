@@ -15,6 +15,7 @@ from actual_reply_engine import ActualReplyEngine
 from current_state_engine import CurrentStateEngine
 from reply_policy import ReplyPolicy
 from training_advisor import TrainingAdvisor
+from ai_training_advisor import AITrainingAdvisor
 from utils import clean_reply, normalize, de_ai_tone
 
 
@@ -46,6 +47,7 @@ class HashimotoArataBot:
         self.current_state = CurrentStateEngine()
         self.reply_policy = ReplyPolicy()
         self.training_advisor = TrainingAdvisor()
+        self.ai_training_advisor = AITrainingAdvisor(client=self.client, model=self.model, memory=self.training_advisor.memory)
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
@@ -56,7 +58,7 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.7",
+            "version=v14.9",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
@@ -234,13 +236,20 @@ class HashimotoArataBot:
     def reply(self, chat_id: str, user_text: str) -> str | None:
         context = self.context(chat_id, user_text)
 
-        # v14.6: practical training-advisor route first.
-        # This prevents workout questions from being treated as inside-joke search queries.
-        training = self.training_advisor.answer(chat_id, user_text)
-        print("training_advisor:", {k: v for k, v in training.items() if k != "answer"}, flush=True)
+        # v14.9: AI training consultation route first.
+        # Training advice is no longer past-log replay or hardcoded menu only.
+        # It uses a general AI advisor, while keeping AIあらくん behavior and safety rules.
+        training_context = self.training_advisor._context(chat_id)
+        training = self.ai_training_advisor.answer(chat_id, user_text, context=training_context)
+        print("ai_training_advisor:", {k: v for k, v in training.items() if k != "answer"}, flush=True)
         if training.get("used"):
             answer = training["answer"]
-            print(f"generation path: training_v14_7_{training.get('kind', 'advisor')}", flush=True)
+            # Store context and logs through the legacy helper.
+            intent = training.get("intent") or {}
+            if intent.get("intent") == "log_workout":
+                self.training_advisor.memory.add(chat_id, user_text)
+            self.training_advisor._remember_context(chat_id, intent, answer)
+            print(f"generation path: training_v14_9_{training.get('kind', 'advisor')}", flush=True)
             self.remember_user(chat_id, user_text)
             self.remember_bot(chat_id, answer)
             return answer
@@ -327,7 +336,7 @@ class HashimotoArataBot:
                 if guarded != canon:
                     print("style_guard:", guard_info, flush=True)
                 answer = guarded
-                print("generation path: canon_v14_7_policy_answer", flush=True)
+                print("generation path: canon_v14_9_policy_answer", flush=True)
                 self.remember_user(chat_id, user_text)
                 self.remember_bot(chat_id, answer)
                 return answer
@@ -352,7 +361,7 @@ class HashimotoArataBot:
                     if guarded != replay:
                         print("style_guard:", guard_info, flush=True)
                     answer = guarded
-                    print("generation path: replay_v14_7_intent_ranked_scene_reply", flush=True)
+                    print("generation path: replay_v14_9_intent_ranked_scene_reply", flush=True)
                     self.remember_user(chat_id, user_text)
                     self.remember_bot(chat_id, answer)
                     return answer
@@ -413,9 +422,9 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v14_7_policy_fallback_continuity", flush=True)
+                    print("generation path: groq_v14_9_policy_fallback_continuity", flush=True)
                 else:
-                    print("generation path: groq_v14_7_policy_fallback_episode", flush=True)
+                    print("generation path: groq_v14_9_policy_fallback_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)

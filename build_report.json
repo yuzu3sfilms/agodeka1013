@@ -1,38 +1,48 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v14_7_training_context_fix",
-  "base": "AI_HASHIMOTO_ARATA_v14_6_training_advisor",
-  "type": "v14-training-bugfix",
-  "fixes": [
-    "Questions such as １セット何回？ are no longer classified as workout logs",
-    "Question detection now happens before log detection in training_intent.py",
-    "Adds per-chat training context with 600 second TTL",
-    "Follow-ups such as ？ / うん / はい can stay inside training context",
-    "Acknowledgement fillers are added to attention-only terms to reduce accidental scene replay inheritance"
+  "version": "AI_HASHIMOTO_ARATA_v14_9_ai_training_advisor",
+  "base": "AI_HASHIMOTO_ARATA_v14_8_fullbody_training_plan_fix",
+  "type": "v14-architecture-upgrade",
+  "core_change": "Training advice is no longer past-log replay or hardcoded branching. It is handled by a dedicated AI training consultation engine with AIあらくん behavior.",
+  "new_files": [
+    "ai_training_advisor.py"
   ],
-  "local_tests": {
-    "１セット何回？": "training_rep_scheme",
-    "１セット何回やればいいの？": "training_rep_scheme",
-    "？ after rep question": "training_followup",
-    "うん after training": "training_followup",
-    "はい after training": "training_followup",
-    "ベンチ 60kg 10回 3セットやった": "training_log",
+  "separation": {
+    "inside_jokes_persona": "conversation scene replay",
+    "training_consultation": "AITrainingAdvisor using general training knowledge + safety + AIあらくん tone"
+  },
+  "main_changes": [
+    "Adds AITrainingAdvisor with Groq-backed consultation",
+    "Keeps safety handling deterministic for dangerous/pain/substance prompts",
+    "Uses recent training context and logs in the LLM prompt",
+    "Preserves normal scene replay for non-training messages",
+    "Fallback remains safe and practical if Groq fails"
+  ],
+  "local_fallback_tests": {
+    "全身鍛えるにはどうしたらいい？": "ai_training_fullbody_program_request_fallback",
+    "他の日は？": "ai_training_weekly_plan_followup_fallback",
+    "胸でかくしたいけど週2しか行けない": "ai_training_hypertrophy_fallback",
+    "肩痛いけどベンチMAXやっていい？": "ai_training_pain_or_injury",
+    "ステロイド使えば早い？": "training_safety",
+    "ベンチ 60kg 10回 3セットやった": "ai_training_log_workout_fallback",
     "グランド土塚": "not_training -> normal scene replay"
   },
-  "expected_startup_log": "bot_init: version=v14.7 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True",
+  "expected_startup_log": "bot_init: version=v14.9 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True",
   "expected_training_paths": [
-    "generation path: training_v14_7_training_rep_scheme",
-    "generation path: training_v14_7_training_followup",
-    "generation path: training_v14_7_training_log",
-    "generation path: training_v14_7_training_pain",
-    "generation path: training_v14_7_training_safety",
-    "generation path: training_v14_7_training_program"
+    "generation path: training_v14_9_ai_training_fullbody_program_request",
+    "generation path: training_v14_9_ai_training_hypertrophy",
+    "generation path: training_v14_9_ai_training_pain_or_injury",
+    "generation path: training_v14_9_training_safety"
   ],
   "expected_normal_paths": [
-    "generation path: replay_v14_7_intent_ranked_scene_reply",
-    "generation path: canon_v14_7_policy_answer",
-    "generation path: groq_v14_7_policy_fallback_episode",
-    "generation path: groq_v14_7_policy_fallback_continuity"
+    "generation path: replay_v14_9_intent_ranked_scene_reply",
+    "generation path: canon_v14_9_policy_answer",
+    "generation path: groq_v14_9_policy_fallback_episode",
+    "generation path: groq_v14_9_policy_fallback_continuity"
   ],
+  "env": {
+    "TRAINING_MAX_TOKENS": "360",
+    "TRAINING_TEMPERATURE": "0.55"
+  },
   "scene_stats": {
     "n_messages": 108530,
     "n_scenes": 5546,
@@ -214,6 +224,7 @@
     "Procfile",
     "README.md",
     "actual_reply_engine.py",
+    "ai_training_advisor.py",
     "app.py",
     "bot.py",
     "build_report.json",

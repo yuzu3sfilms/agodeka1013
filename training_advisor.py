@@ -8,6 +8,7 @@ from training_memory import TrainingMemory
 
 
 PART_LABELS = {
+    "fullbody": "全身",
     "chest": "胸",
     "back": "背中",
     "legs": "脚",
@@ -18,6 +19,13 @@ PART_LABELS = {
 
 
 MENU = {
+    "fullbody": [
+        "スクワット or レッグプレス 3セット",
+        "ベンチプレス or 腕立て 3セット",
+        "ラットプル or 懸垂 3セット",
+        "ショルダープレス or サイドレイズ 2セット",
+        "余力があれば腹筋 2セット",
+    ],
     "chest": [
         "ベンチプレス 3〜4セット",
         "インクラインダンベルプレス 2〜3セット",
@@ -100,6 +108,13 @@ class TrainingAdvisor:
         if not parts:
             parts = ["chest"]
         lines = []
+        # Fullbody should be shown as one integrated menu, not split into chest default.
+        if "fullbody" in parts:
+            lines.append("【全身】")
+            for item in MENU["fullbody"]:
+                lines.append(f"- {item}")
+            return "\n".join(lines)
+
         for part in parts[:2]:
             label = PART_LABELS.get(part, part)
             lines.append(f"【{label}】")
@@ -112,6 +127,27 @@ class TrainingAdvisor:
         out = {"used": True, "kind": kind, "answer": answer, "intent": info}
         out.update(extra)
         return out
+
+    def _weekly_fullbody_plan(self):
+        return (
+            "他の日もやるなら、最初は週3くらいで十分です。\n"
+            "【Day 1 全身A】\n"
+            "- スクワット 3セット\n"
+            "- ベンチプレス 3セット\n"
+            "- ラットプル 3セット\n"
+            "- サイドレイズ 2セット\n\n"
+            "【Day 2 全身B】\n"
+            "- ルーマニアンデッド 3セット\n"
+            "- インクラインプレス 3セット\n"
+            "- ローイング 3セット\n"
+            "- 腹筋 2セット\n\n"
+            "【Day 3 軽め全身】\n"
+            "- レッグプレス 2〜3セット\n"
+            "- 腕立て or 軽めベンチ 2〜3セット\n"
+            "- 懸垂 or ラットプル 2〜3セット\n"
+            "- 余力で腕か肩を2セット\n\n"
+            "まずはこれで回して、疲労が強いならDay 3を休みにしていいです。"
+        )
 
     def answer(self, chat_id: str, user_text: str):
         ctx = self._context(chat_id)
@@ -156,6 +192,27 @@ class TrainingAdvisor:
                 "慣れてきたら4セット目を足す、くらいでいいと思います。"
             )
             return self._used(chat_id, "training_followup", ans, info)
+
+        if intent == "weekly_plan_followup":
+            prev_intent = ctx.get("intent")
+            if prev_intent in ["fullbody_program_request", "program_request", "training_followup_question", "training_ack_or_followup"]:
+                ans = self._weekly_fullbody_plan()
+            else:
+                ans = (
+                    "他の日もやるなら、週3の全身法がやりやすいです。\n"
+                    "Day1はスクワット・ベンチ・ラットプル、Day2はデッド系・インクライン・ロー、Day3は軽め全身。\n"
+                    "疲労が強ければ週2からでいいです。"
+                )
+            return self._used(chat_id, "training_weekly_plan", ans, info)
+
+        if intent == "fullbody_program_request":
+            ans = (
+                "全身なら、まずは週2〜3回でこれがいいと思います。\n"
+                f"{self._format_menu(['fullbody'])}\n\n"
+                "1種目3セット前後、1セット8〜12回目安。\n"
+                "全部位を毎回限界まで潰すより、少し余力を残して継続した方が伸びます。"
+            )
+            return self._used(chat_id, "training_fullbody_program", ans, info)
 
         if intent == "training_followup_question":
             prev_intent = ctx.get("intent")

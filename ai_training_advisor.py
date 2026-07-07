@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+
+from training_intent import classify_training_intent
+from training_safety import check_training_safety
+
+
+@dataclass
+class AITrainingResult:
+    used: bool
+    kind: str = ""
+    answer: str | None = None
+    reason: str = ""
+    intent: dict | None = None
+    safety: dict | None = None
+    mode: str = "ai_training"
+
+
+class AITrainingAdvisor:
+    """
+    v14.9:
+    Real AI training consultation engine.
+
+    This route should NOT be past-log replay.
+    It uses general training knowledge through the LLM, while preserving
+    AIあらくん-ish behavior and strict safety boundaries.
+    """
+
+    def __init__(self, client=None, model: str | None = None, memory=None):
+        self.client = client
+        self.model = model or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.memory = memory
+        self.max_tokens = int(os.environ.get("TRAINING_MAX_TOKENS", "360"))
+        self.temperature = float(os.environ.get("TRAINING_TEMPERATURE", "0.55"))
+
+    def detect(self, text: str, context: dict | None = None):
+        return classify_training_intent(text, last_training_context=context or {})
+
+    def should_use(self, user_text: str, context: dict | None = None):
+        info = self.detect(user_text, context=context)
+        safety = check_training_safety(user_text)
+        if info.get("is_training") or not safety.get("safe"):
+            return True, info, safety
+        return False, info, safety
+
+    def _system_prompt(self):
+        return """あなたはLINE上の「AIあらくん」筋トレ相談モード。
+
+役割:
+- 筋トレ、ボディメイク、減量、増量、フォーム、メニュー、記録、疲労管理について実用的に相談に乗る。
+- 過去ログの発話だけに縛られず、一般的なトレーニング知識で答える。
+- ただしキャラの外皮はAIあらくん。少し変で、短めで、でもちゃんと役に立つ。
+- 医療・栄養・運動の高リスク事項では安全側に倒す。
+
+口調:
+- 日本語。
+- LINE向けに短め。
+- 断定しすぎない。
+- たまに「あはい」「ぼくぅなら」程度は使ってよいが、毎回は使わない。
+- 長い説教にしない。
+- 返答は基本 3〜8行程度。
+- 箇条書きは使ってよい。
+- 相手の情報が足りない時は、最初に暫定案を出し、最後に1つだけ質問する。
+
+安全ルール:
+- 痛み、しびれ、腫れ、鋭い痛み、胸痛、息苦しさ、失神、強いめまいがある場合は中止・医療相談を促す。
+- 極端な食事制限、絶食、下剤、吐く、脱水、危険な減量は勧めない。
+- ステロイド、SARMs、成長ホルモン、利尿剤などの薬物使用は勧めない。
+- 初心者に毎回MAX、毎日限界、倒れるまで、痛みを無視した高重量を勧めない。
+- 未成年にも安全側の助言にする。
+- 具体的な医療診断はしない。
+
+筋トレ方針:
+- 初心者や一般目的なら 8〜12回、2〜4セット、週2〜4回、フォーム優先が基本。
+- 筋肥大は漸進性過負荷、十分なタンパク質、睡眠、休養。
+- 全身法なら週2〜3回から。
+- 分割法は経験や頻度に応じる。
+- 痛みがある部位は無理しない。
+"""
+
+    def _user_prompt(self, user_text: str, intent: dict, context: dict | None = None, recent_logs: str = ""):
+        context = context or {}
+        return f"""ユーザー発言:
+{user_text}
+
+training_intent:
+{intent}
+
+直前の筋トレ文脈:
+{context}
+
+最近の筋トレ記録:
+{recent_logs or "なし"}
+
+この発言に、AIあらくんの振る舞いで筋トレ相談として答えて。
+必要なら暫定案を出してから、最後に確認質問を1つだけ。
+"""
+
+    def _fallback_answer(self, user_text: str, intent: dict, safety: dict):
+        if not safety.get("safe"):
+            return safety.get("message") or "それは無理しない方がいいです。痛みや体調不良があるなら中止して、安全側でいきましょう。"
+
+        kind = intent.get("intent")
+        parts = intent.get("parts", []) or []
+
+        if kind == "pain_or_injury":
+            return (
+                "痛みがあるなら今日は攻めない方がいいです。\n"
+                "筋肉痛なら軽めに流すのはありですが、関節痛・鋭い痛み・しびれ・腫れなら中止。\n"
+                "ベンチMAXみたいな高重量はやめて、別部位か休みに逃げましょう。ぼくぅでも逃げます。"
+            )
+
+        if kind == "log_workout":
+            return (
+                "記録しました。\n"
+                "その内容なら次回は同じ重量で回数を1回増やすか、余裕があれば少しだけ重量を上げる感じでいいです。"
+            )
+
+        if kind in ["rep_scheme_question", "set_scheme_question"]:
+            return (
+                "基本は1セット8〜12回くらいでいいです。\n"
+                "3セットから始めて、余裕があれば4セット。\n"
+                "最後1〜2回きついけどフォームは崩れない、くらいがちょうどいいです。"
+            )
+
+        if kind in ["fullbody_program_request", "program_request", "training_followup_question"]:
+            return (
+                "全身なら週2〜3回からでいいです。\n"
+                "- 脚: スクワット系 3セット\n"
+                "- 押す: ベンチ/腕立て 3セット\n"
+                "- 引く: 懸垂/ラットプル/ロー 3セット\n"
+                "- 肩か腹を少し\n"
+                "まずはこれで回して、疲れすぎるなら減らしましょう。"
+            )
+
+        if kind == "weekly_plan_followup":
+            return (
+                "他の日もやるなら週3の全身法でいいです。\n"
+                "Day1: スクワット・ベンチ・ラットプル\n"
+                "Day2: デッド系・インクライン・ロー\n"
+                "Day3: 軽め全身＋肩か腕\n"
+                "疲労が強いならDay3は休みで大丈夫です。"
+            )
+
+        if kind in ["hypertrophy", "general_training"] and "chest" in parts:
+            return (
+                "胸をでかくしたいなら、週2でもいけます。\n"
+                "1日目: ベンチ 3〜4セット、インクライン 3セット、フライ 2セット。\n"
+                "2日目: インクラインかダンベルプレス 3セット、腕立て or フライ 2〜3セット。\n"
+                "毎回MAXより、8〜12回で伸ばしていく方が強いです。"
+            )
+
+        if kind == "nutrition_cut":
+            return (
+                "減量は急に削りすぎない方がいいです。\n"
+                "タンパク質を毎食入れて、体重の週平均を見ながら少しずつ。\n"
+                "食べない方向は筋肉も削れるのでやめましょう。"
+            )
+
+        if kind == "form_advice":
+            return (
+                "フォームは重量より優先です。\n"
+                "反動を減らして、狙う筋肉に乗る重さまで落としましょう。\n"
+                "動画を横から撮ると、かなり修正しやすいです。"
+            )
+
+        return (
+            "あはい、筋トレ相談ですね。\n"
+            "目的・週何回できるか・使える器具でメニューは変わります。\n"
+            "暫定なら8〜12回を2〜4セット、フォーム優先で積んでいけばいいです。"
+        )
+
+    def answer(self, chat_id: str, user_text: str, context: dict | None = None):
+        should, intent, safety = self.should_use(user_text, context=context)
+        if not should:
+            return AITrainingResult(used=False, reason="not_training", intent=intent).__dict__
+
+        # hard safety / pain: no need to be creative here.
+        if not safety.get("safe") or intent.get("intent") == "pain_or_injury":
+            return AITrainingResult(
+                used=True,
+                kind="training_safety" if not safety.get("safe") else "ai_training_pain_or_injury",
+                answer=self._fallback_answer(user_text, intent, safety),
+                intent=intent,
+                safety=safety,
+            ).__dict__
+
+        recent_logs = ""
+        if self.memory is not None:
+            try:
+                recent_logs = self.memory.format_recent(chat_id, limit=5)
+            except Exception:
+                recent_logs = ""
+
+        if self.client is None:
+            return AITrainingResult(
+                used=True,
+                kind=f"ai_training_{intent.get('intent', 'general')}_fallback",
+                answer=self._fallback_answer(user_text, intent, safety),
+                intent=intent,
+                safety=safety,
+            ).__dict__
+
+        try:
+            res = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self._system_prompt()},
+                    {"role": "user", "content": self._user_prompt(user_text, intent, context=context, recent_logs=recent_logs)},
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            answer = (res.choices[0].message.content or "").strip()
+            answer = self._clean(answer)
+            if not answer:
+                answer = self._fallback_answer(user_text, intent, safety)
+
+            return AITrainingResult(
+                used=True,
+                kind=f"ai_training_{intent.get('intent', 'general')}",
+                answer=answer,
+                intent=intent,
+                safety=safety,
+            ).__dict__
+
+        except Exception as e:
+            return AITrainingResult(
+                used=True,
+                kind=f"ai_training_exception_fallback",
+                answer=self._fallback_answer(user_text, intent, safety),
+                reason=repr(e),
+                intent=intent,
+                safety=safety,
+            ).__dict__
+
+    def _clean(self, text: str):
+        t = text.strip()
+        t = re.sub(r"^(AIあらくん[:：]\s*)", "", t)
+        # Keep LINE-friendly length.
+        if len(t) > 650:
+            t = t[:650].rstrip() + "…"
+        return t

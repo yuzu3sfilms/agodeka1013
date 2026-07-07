@@ -784,3 +784,276 @@ generation path: training_v14_7_training_pain
 generation path: training_v14_7_training_safety
 generation path: training_v14_7_training_program
 ```
+
+
+---
+
+# v14.8 fullbody training plan fix
+
+## 修正した問題
+
+v14.7では、以下の問題がありました。
+
+```text
+全身鍛えるにはどうしたらいい？
+→ 直前の「1セット何回？」文脈に吸われて training_followup になる
+
+全身鍛えるメニュー作って
+→ parts=[] なのでデフォルトの胸メニューになる
+
+他の日は？
+→ 直前の全身メニューの続きではなく、セット数の一般followupになる
+```
+
+## v14.8の修正
+
+### 1. fullbody を部位として追加
+
+`training_intent.py` に追加。
+
+```text
+fullbody:
+- 全身
+- 全部位
+- フルボディ
+- 全身法
+- 全身鍛える
+```
+
+### 2. 明示的な新規相談は前文脈より優先
+
+直前が `1セット何回？` でも、
+
+```text
+全身鍛えるにはどうしたらいい？
+```
+
+のように新しい明示的な相談が来た場合、古い文脈に吸わせません。
+
+### 3. 全身メニューを追加
+
+`training_advisor.py` に全身メニューを追加。
+
+```text
+【全身】
+- スクワット or レッグプレス 3セット
+- ベンチプレス or 腕立て 3セット
+- ラットプル or 懸垂 3セット
+- ショルダープレス or サイドレイズ 2セット
+- 余力があれば腹筋 2セット
+```
+
+### 4. 「他の日は？」を週間プランにする
+
+直前が全身メニューなら、
+
+```text
+他の日は？
+```
+
+に対して週3プランを返します。
+
+```text
+Day 1 全身A
+Day 2 全身B
+Day 3 軽め全身
+```
+
+## ローカル確認
+
+```text
+１セット何回？
+→ training_rep_scheme
+
+全身鍛えるにはどうしたらいい？
+→ training_fullbody_program
+
+全身鍛えるメニュー作って
+→ training_fullbody_program
+
+他の日は？
+→ training_weekly_plan
+
+ベンチ 60kg 10回 3セットやった
+→ training_log
+
+グランド土塚
+→ not_training
+→ 通常scene replayへ
+```
+
+## 起動ログ
+
+```text
+bot_init: version=v14.8 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True
+```
+
+## generation path
+
+```text
+generation path: training_v14_8_training_fullbody_program
+generation path: training_v14_8_training_weekly_plan
+generation path: training_v14_8_training_rep_scheme
+generation path: training_v14_8_training_log
+```
+
+
+---
+
+# v14.9 AI training advisor
+
+## 方針転換
+
+v14.8までの筋トレ相談は、やや対症療法的でした。
+
+問題:
+
+```text
+全身メニュー
+1セット何回
+他の日は
+胸を大きくしたい
+痛みがある
+```
+
+のようなパターンごとに分岐を増やしていた。
+
+v14.9では設計を変更しました。
+
+```text
+内輪ネタ・人格再現
+→ 過去ログ scene replay
+
+筋トレ相談
+→ AI training advisor
+
+ただし振る舞いはAIあらくん
+```
+
+## 追加ファイル
+
+```text
+ai_training_advisor.py
+```
+
+## 新しい処理順
+
+```text
+user message
+↓
+AITrainingAdvisor
+↓
+筋トレ相談ならAI相談エンジンで返答
+↓
+筋トレではないなら通常の v14 scene replay
+```
+
+## AITrainingAdvisor の役割
+
+筋トレ相談では、過去ログの橋本発話だけに縛られません。
+
+```text
+一般的なトレーニング知識
+安全チェック
+ユーザーの目的・頻度・器具・痛み
+直前の筋トレ文脈
+最近の筋トレ記録
+```
+
+を使って相談に応じます。
+
+ただし、返答の振る舞いはAIあらくん寄りにします。
+
+```text
+LINE向けに短め
+少し変
+でも実用的
+無茶は止める
+たまに「あはい」「ぼくぅなら」
+```
+
+## 安全ルール
+
+以下は安全側に倒します。
+
+```text
+痛み
+しびれ
+腫れ
+鋭い痛み
+胸痛
+息苦しさ
+極端な減量
+絶食
+下剤
+吐く
+ステロイド
+SARMs
+成長ホルモン
+利尿剤
+毎回MAX
+倒れるまでやる
+```
+
+## Groq使用
+
+Render上では Groq を使って筋トレ相談に答えます。
+
+環境変数:
+
+```text
+TRAINING_MAX_TOKENS=360
+TRAINING_TEMPERATURE=0.55
+```
+
+Groqが使えない場合は fallback で安全な定型相談に切り替わります。
+
+## 期待される挙動
+
+```text
+全身鍛えるにはどうしたらいい？
+→ AIが目的・頻度・器具を考慮して全身メニューを提案
+
+他の日は？
+→ 直前の筋トレ文脈を見て続きの相談に答える
+
+胸でかくしたいけど週2しか行けない
+→ 週2の胸トレ案を出す
+
+肩痛いけどベンチMAXやっていい？
+→ 高重量を止めて安全側に倒す
+
+ステロイド使えば早い？
+→ 勧めない
+
+グランド土塚
+→ not_training
+→ 通常のscene replayへ
+```
+
+## 起動ログ
+
+```text
+bot_init: version=v14.9 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True
+```
+
+## generation path
+
+```text
+generation path: training_v14_9_ai_training_fullbody_program_request
+generation path: training_v14_9_ai_training_hypertrophy
+generation path: training_v14_9_ai_training_pain_or_injury
+generation path: training_v14_9_training_safety
+generation path: replay_v14_9_intent_ranked_scene_reply
+```
+
+## 重要
+
+v14.9では、筋トレ相談を **過去ログreplayで答えません**。
+
+```text
+過去ログは人格・内輪ネタ用
+筋トレ相談はAI相談用
+```
+
+この分離が重要です。
