@@ -464,3 +464,189 @@ generation path: groq_v14_5_policy_fallback_continuity
 短文完全一致への過剰吸着を抑える
 エピソード展開・回想・説明・確認に汎用対応する
 ```
+
+
+---
+
+# v14.6 training advisor
+
+## 目的
+
+v14.6では、AIあらくんに **筋トレ相談機能** を追加しました。
+
+通常の内輪ネタ・人格再演は v14.5 のまま維持しつつ、筋トレ相談だけ専用ルートで処理します。
+
+## 追加ファイル
+
+```text
+training_intent.py
+training_safety.py
+training_memory.py
+training_advisor.py
+```
+
+## 処理順
+
+v14.6では、筋トレ相談を最上流で判定します。
+
+```text
+user message
+↓
+training_advisor
+↓
+筋トレ相談ならここで返答
+↓
+違うなら v14.5 の current_state / scene replay / Groq fallback
+```
+
+理由:
+
+```text
+今日胸
+ベンチ何セット？
+筋肉痛あるけど脚やっていい？
+減量したい
+```
+
+のような実用相談を、過去ログの内輪ネタ検索に流さないため。
+
+## training_intent.py
+
+以下を分類します。
+
+```text
+program_request
+log_workout
+pain_or_injury
+nutrition_cut
+hypertrophy
+form_advice
+general_training
+```
+
+部位も拾います。
+
+```text
+chest
+back
+legs
+shoulders
+arms
+core
+```
+
+## training_safety.py
+
+危険そうな相談は安全側に倒します。
+
+拾うもの:
+
+```text
+鋭い痛み
+しびれ
+腫れ
+激痛
+極端な減量
+食べない減量
+倒れるまでやる
+毎回MAX
+ステロイド
+ホルモン系
+SARMs
+```
+
+返答例:
+
+```text
+薬物とかホルモン系で伸ばす方向は危ないので勧めません。
+まずは睡眠、食事、フォーム、漸進的な重量アップでいきましょう。
+```
+
+## training_memory.py
+
+簡易的な筋トレ記録を保持します。
+
+例:
+
+```text
+ベンチ 60kg 10回 3セットやった
+```
+
+返答:
+
+```text
+記録しました。
+1. ベンチ 60kg 10回 3セットやった
+```
+
+注意:
+
+```text
+Render再起動で消えるin-memory記録です。
+永続化するならDB接続が必要です。
+```
+
+## training_advisor.py
+
+例:
+
+```text
+今日胸
+```
+
+返答例:
+
+```text
+あはい、今日はこれでいいと思います。
+【胸】
+- ベンチプレス 3〜4セット
+- インクラインダンベルプレス 2〜3セット
+- ケーブル or ダンベルフライ 2〜3セット
+- 余力があれば腕立て 1〜2セット
+
+全部限界まで潰すより、フォーム崩さず最後1〜2回きついくらいで積みましょう。
+```
+
+## 起動ログ
+
+```text
+bot_init: version=v14.6 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True
+```
+
+## generation path
+
+```text
+generation path: training_v14_6_training_program
+generation path: training_v14_6_training_log
+generation path: training_v14_6_training_pain
+generation path: training_v14_6_training_safety
+generation path: training_v14_6_training_nutrition
+```
+
+通常会話では従来通り:
+
+```text
+generation path: replay_v14_6_intent_ranked_scene_reply
+generation path: canon_v14_6_policy_answer
+generation path: groq_v14_6_policy_fallback_episode
+generation path: groq_v14_6_policy_fallback_continuity
+```
+
+## ローカル確認
+
+```text
+今日胸
+→ training_program
+
+ベンチ 60kg 10回 3セットやった
+→ training_log
+
+筋肉痛あるけど脚やっていい？
+→ training_pain
+
+ステロイド使えば早い？
+→ training_safety
+
+グランド土塚
+→ not_training, 通常のscene replayへ
+```

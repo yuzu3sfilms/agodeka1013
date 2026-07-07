@@ -14,6 +14,7 @@ from persona_judge import PersonaJudge
 from actual_reply_engine import ActualReplyEngine
 from current_state_engine import CurrentStateEngine
 from reply_policy import ReplyPolicy
+from training_advisor import TrainingAdvisor
 from utils import clean_reply, normalize, de_ai_tone
 
 
@@ -44,6 +45,7 @@ class HashimotoArataBot:
         self.replay_engine = ActualReplyEngine()
         self.current_state = CurrentStateEngine()
         self.reply_policy = ReplyPolicy()
+        self.training_advisor = TrainingAdvisor()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
@@ -54,11 +56,11 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.5",
+            "version=v14.6",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
-            f"replay_scenes={len(getattr(self.replay_engine, 'scenes', []))}", f"policy=True",
+            f"replay_scenes={len(getattr(self.replay_engine, 'scenes', []))}", f"policy=True", f"training=True",
             flush=True,
         )
 
@@ -231,6 +233,18 @@ class HashimotoArataBot:
 
     def reply(self, chat_id: str, user_text: str) -> str | None:
         context = self.context(chat_id, user_text)
+
+        # v14.6: practical training-advisor route first.
+        # This prevents workout questions from being treated as inside-joke search queries.
+        training = self.training_advisor.answer(chat_id, user_text)
+        print("training_advisor:", {k: v for k, v in training.items() if k != "answer"}, flush=True)
+        if training.get("used"):
+            answer = training["answer"]
+            print(f"generation path: training_v14_6_{training.get('kind', 'advisor')}", flush=True)
+            self.remember_user(chat_id, user_text)
+            self.remember_bot(chat_id, answer)
+            return answer
+
         raw_result = self.searcher.search(user_text)
         inherited_topic = False
         if self.should_inherit_topic(chat_id, user_text, raw_result):
@@ -313,7 +327,7 @@ class HashimotoArataBot:
                 if guarded != canon:
                     print("style_guard:", guard_info, flush=True)
                 answer = guarded
-                print("generation path: canon_v14_5_policy_answer", flush=True)
+                print("generation path: canon_v14_6_policy_answer", flush=True)
                 self.remember_user(chat_id, user_text)
                 self.remember_bot(chat_id, answer)
                 return answer
@@ -338,7 +352,7 @@ class HashimotoArataBot:
                     if guarded != replay:
                         print("style_guard:", guard_info, flush=True)
                     answer = guarded
-                    print("generation path: replay_v14_5_intent_ranked_scene_reply", flush=True)
+                    print("generation path: replay_v14_6_intent_ranked_scene_reply", flush=True)
                     self.remember_user(chat_id, user_text)
                     self.remember_bot(chat_id, answer)
                     return answer
@@ -399,9 +413,9 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v14_5_policy_fallback_continuity", flush=True)
+                    print("generation path: groq_v14_6_policy_fallback_continuity", flush=True)
                 else:
-                    print("generation path: groq_v14_5_policy_fallback_episode", flush=True)
+                    print("generation path: groq_v14_6_policy_fallback_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)

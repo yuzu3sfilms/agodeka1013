@@ -1,28 +1,40 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v14_5_general_query_intent_ranker",
-  "base": "AI_HASHIMOTO_ARATA_v14_4_scene_ranker_attention_fix",
-  "type": "v14-generalization-upgrade",
+  "version": "AI_HASHIMOTO_ARATA_v14_6_training_advisor",
+  "base": "AI_HASHIMOTO_ARATA_v14_5_general_query_intent_ranker",
+  "type": "v14-practical-feature-upgrade",
   "new_files": [
-    "query_intent.py"
+    "training_intent.py",
+    "training_safety.py",
+    "training_memory.py",
+    "training_advisor.py"
   ],
-  "fixes": [
-    "Generalizes follow-up handling from individual words to query intent categories",
-    "Adds memory_recall, meaning_explain, existence_check, time/place/person/count question, yesno, attention, generic question categories",
-    "Ranks actual Hashimoto replies based on query intent rather than short exact match only",
-    "Penalizes bare topic echoes when the user asks for expansion/explanation/recall"
+  "main_changes": [
+    "Adds workout/training-advice route before inside-joke scene search",
+    "Classifies training intents including program_request, log_workout, pain_or_injury, nutrition_cut, hypertrophy, form_advice",
+    "Adds lightweight in-memory workout log",
+    "Adds safety handling for pain, extreme dieting, overtraining, and drug/hormone-related prompts",
+    "Keeps normal AIあらくん scene replay unchanged for non-training messages"
   ],
   "local_tests": {
-    "なつかしい？": "グランド土塚なつかしいわあ",
-    "それ何？": "これをグランド土塚と呼び、崇めたてまつります。",
-    "由来は？": "これをグランド土塚と呼び、崇めたてまつります。",
-    "覚えてる？": "グランド土塚なつかしいわあ"
+    "今日胸": "training_program",
+    "ベンチ 60kg 10回 3セットやった": "training_log",
+    "筋肉痛あるけど脚やっていい？": "training_pain",
+    "ステロイド使えば早い？": "training_safety",
+    "グランド土塚": "not_training -> normal scene replay"
   },
-  "expected_startup_log": "bot_init: version=v14.5 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True",
-  "expected_paths": [
-    "generation path: replay_v14_5_intent_ranked_scene_reply",
-    "generation path: canon_v14_5_policy_answer",
-    "generation path: groq_v14_5_policy_fallback_episode",
-    "generation path: groq_v14_5_policy_fallback_continuity"
+  "expected_startup_log": "bot_init: version=v14.6 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True",
+  "expected_training_paths": [
+    "generation path: training_v14_6_training_program",
+    "generation path: training_v14_6_training_log",
+    "generation path: training_v14_6_training_pain",
+    "generation path: training_v14_6_training_safety",
+    "generation path: training_v14_6_training_nutrition"
+  ],
+  "expected_normal_paths": [
+    "generation path: replay_v14_6_intent_ranked_scene_reply",
+    "generation path: canon_v14_6_policy_answer",
+    "generation path: groq_v14_6_policy_fallback_episode",
+    "generation path: groq_v14_6_policy_fallback_continuity"
   ],
   "scene_stats": {
     "n_messages": 108530,
@@ -226,6 +238,10 @@
     "reply_policy.py",
     "requirements.txt",
     "style_guard.py",
+    "training_advisor.py",
+    "training_intent.py",
+    "training_memory.py",
+    "training_safety.py",
     "utils.py"
   ]
 }

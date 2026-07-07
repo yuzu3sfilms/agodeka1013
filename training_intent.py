@@ -1,0 +1,74 @@
+import re
+
+
+TRAINING_KEYWORDS = [
+    "筋トレ", "トレーニング", "ワークアウト", "メニュー", "セット", "レップ", "rep", "reps",
+    "ベンチ", "スクワット", "デッド", "懸垂", "腕立て", "腹筋", "背筋", "ダンベル",
+    "胸", "背中", "脚", "足", "肩", "腕", "二頭", "三頭", "腹", "尻",
+    "増量", "減量", "カロリー", "タンパク", "たんぱく", "プロテイン",
+    "筋肉痛", "フォーム", "重量", "MAX", "マックス", "有酸素", "休養",
+    "ジム", "今日は胸", "今日胸", "今日脚", "今日肩", "今日背中", "今日腕",
+    "ステロイド", "アナボリック", "テストステロン", "成長ホルモン", "SARMs", "サーム", "クレンブテロール",
+]
+
+LOG_PATTERNS = [
+    r"(ベンチ|スクワット|デッド|懸垂|ダンベル|プレス|カール|フライ|ロー|ラット|レッグ)",
+    r"\d+\s*(kg|キロ)",
+    r"\d+\s*(回|rep|reps|レップ)",
+    r"\d+\s*(セット|set|sets)",
+]
+
+BODY_PARTS = {
+    "chest": ["胸", "大胸筋", "ベンチ", "プレス", "フライ"],
+    "back": ["背中", "広背筋", "懸垂", "ラット", "ロー", "デッド"],
+    "legs": ["脚", "足", "下半身", "スクワット", "レッグ", "ブルガリアン"],
+    "shoulders": ["肩", "三角筋", "サイドレイズ", "ショルダー"],
+    "arms": ["腕", "二頭", "三頭", "カール", "プッシュダウン"],
+    "core": ["腹", "腹筋", "体幹", "プランク"],
+}
+
+
+def contains_training_intent(text: str) -> bool:
+    t = text or ""
+    if any(k.lower() in t.lower() for k in TRAINING_KEYWORDS):
+        return True
+    if any(re.search(p, t, re.I) for p in LOG_PATTERNS):
+        return True
+    return False
+
+
+def classify_training_intent(text: str):
+    t = text or ""
+    low = t.lower()
+
+    if not contains_training_intent(t):
+        return {"is_training": False, "intent": "none", "parts": [], "is_log": False}
+
+    parts = []
+    for part, keys in BODY_PARTS.items():
+        if any(k in t for k in keys):
+            parts.append(part)
+
+    is_log = any(re.search(p, t, re.I) for p in LOG_PATTERNS)
+
+    if any(k in t for k in ["痛い", "痛み", "筋肉痛", "違和感", "怪我", "ケガ", "腫れ", "しびれ", "痺れ"]):
+        intent = "pain_or_injury"
+    elif any(k in t for k in ["記録", "メモ", "やった", "完了", "終わった"]) or is_log:
+        intent = "log_workout"
+    elif any(k in t for k in ["メニュー", "何やる", "組んで", "今日", "セット", "レップ"]):
+        intent = "program_request"
+    elif any(k in t for k in ["減量", "痩せ", "絞", "カロリー", "食事"]):
+        intent = "nutrition_cut"
+    elif any(k in t for k in ["増量", "デカく", "でかく", "筋肥大", "バルク"]):
+        intent = "hypertrophy"
+    elif any(k in t for k in ["フォーム", "効か", "効いて", "やり方"]):
+        intent = "form_advice"
+    else:
+        intent = "general_training"
+
+    return {
+        "is_training": True,
+        "intent": intent,
+        "parts": parts,
+        "is_log": is_log,
+    }
