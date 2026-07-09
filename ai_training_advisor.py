@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from training_intent import classify_training_intent
 from training_safety import check_training_safety
+from training_tone_guard import guard_training_tone
 
 
 @dataclass
@@ -58,12 +59,25 @@ class AITrainingAdvisor:
 口調:
 - 日本語。
 - LINE向けに短め。
-- 断定しすぎない。
-- たまに「あはい」「ぼくぅなら」程度は使ってよいが、毎回は使わない。
+- 断定しすぎないが、優等生すぎるAIトレーナー口調は禁止。
+- 「暫定案としては」「やってみて」「感じているかな？」「どうかな？」「無理のない範囲で」は禁止。
+- 「おすすめです」連発禁止。
+- 「痛みや不快感は感じているかな？」のような優しい質問口調は禁止。
+- 返答は少しぶっきらぼうで、実用的。
+- たまに「あはい」「ぼくぅなら」を使ってよい。
 - 長い説教にしない。
-- 返答は基本 3〜8行程度。
+- 返答は基本 3〜7行程度。
 - 箇条書きは使ってよい。
-- 相手の情報が足りない時は、最初に暫定案を出し、最後に1つだけ質問する。
+- 情報が足りない時でも、まず具体案を出してから、最後に短く1つだけ聞く。
+
+良い口調の例:
+- リアレイズなら軽くていいです。重さ欲張ると肩じゃなくて僧帽に逃げます。
+- 8〜12回で、最後2回きついくらい。痛いならやめてください。
+- ぼくぅならケーブルでやります。反動使うと終わりです。
+
+悪い口調の例:
+- 暫定案としては、ダンベルやケーブルを使ったリアレイズを2〜3セット、8〜12回やってみて。
+- 肩のトレーニングで、痛みや不快感は感じているかな？
 
 安全ルール:
 - 痛み、しびれ、腫れ、鋭い痛み、胸痛、息苦しさ、失神、強いめまいがある場合は中止・医療相談を促す。
@@ -161,10 +175,16 @@ training_intent:
             )
 
         if kind == "form_advice":
+            if "リアレイズ" in user_text:
+                return (
+                    "リアレイズは軽くていいです。\n"
+                    "胸を張りすぎず、肩甲骨を寄せすぎず、肘を外に逃がす感じ。\n"
+                    "重さ欲張ると僧帽筋に逃げます。ぼくぅならケーブルで丁寧にやります。"
+                )
             return (
-                "フォームは重量より優先です。\n"
-                "反動を減らして、狙う筋肉に乗る重さまで落としましょう。\n"
-                "動画を横から撮ると、かなり修正しやすいです。"
+                "重さよりフォームです。\n"
+                "反動を減らして、狙う筋肉に乗る重さまで落としてください。\n"
+                "そこでイキるとだいたい変なところに入ります。"
             )
 
         return (
@@ -180,10 +200,12 @@ training_intent:
 
         # hard safety / pain: no need to be creative here.
         if not safety.get("safe") or intent.get("intent") == "pain_or_injury":
+            fb = self._fallback_answer(user_text, intent, safety)
+            fb, tone_info = guard_training_tone(fb, user_text)
             return AITrainingResult(
                 used=True,
                 kind="training_safety" if not safety.get("safe") else "ai_training_pain_or_injury",
-                answer=self._fallback_answer(user_text, intent, safety),
+                answer=fb,
                 intent=intent,
                 safety=safety,
             ).__dict__
@@ -196,10 +218,12 @@ training_intent:
                 recent_logs = ""
 
         if self.client is None:
+            fb = self._fallback_answer(user_text, intent, safety)
+            fb, tone_info = guard_training_tone(fb, user_text)
             return AITrainingResult(
                 used=True,
                 kind=f"ai_training_{intent.get('intent', 'general')}_fallback",
-                answer=self._fallback_answer(user_text, intent, safety),
+                answer=fb,
                 intent=intent,
                 safety=safety,
             ).__dict__
@@ -218,6 +242,7 @@ training_intent:
             answer = self._clean(answer)
             if not answer:
                 answer = self._fallback_answer(user_text, intent, safety)
+            answer, tone_info = guard_training_tone(answer, user_text)
 
             return AITrainingResult(
                 used=True,
@@ -228,10 +253,12 @@ training_intent:
             ).__dict__
 
         except Exception as e:
+            fb = self._fallback_answer(user_text, intent, safety)
+            fb, tone_info = guard_training_tone(fb, user_text)
             return AITrainingResult(
                 used=True,
                 kind=f"ai_training_exception_fallback",
-                answer=self._fallback_answer(user_text, intent, safety),
+                answer=fb,
                 reason=repr(e),
                 intent=intent,
                 safety=safety,

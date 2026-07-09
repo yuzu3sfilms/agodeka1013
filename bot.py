@@ -58,7 +58,7 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.9",
+            "version=v14.10",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
@@ -249,7 +249,7 @@ class HashimotoArataBot:
             if intent.get("intent") == "log_workout":
                 self.training_advisor.memory.add(chat_id, user_text)
             self.training_advisor._remember_context(chat_id, intent, answer)
-            print(f"generation path: training_v14_9_{training.get('kind', 'advisor')}", flush=True)
+            print(f"generation path: training_v14_10_{training.get('kind', 'advisor')}", flush=True)
             self.remember_user(chat_id, user_text)
             self.remember_bot(chat_id, answer)
             return answer
@@ -336,7 +336,7 @@ class HashimotoArataBot:
                 if guarded != canon:
                     print("style_guard:", guard_info, flush=True)
                 answer = guarded
-                print("generation path: canon_v14_9_policy_answer", flush=True)
+                print("generation path: canon_v14_10_policy_answer", flush=True)
                 self.remember_user(chat_id, user_text)
                 self.remember_bot(chat_id, answer)
                 return answer
@@ -361,7 +361,7 @@ class HashimotoArataBot:
                     if guarded != replay:
                         print("style_guard:", guard_info, flush=True)
                     answer = guarded
-                    print("generation path: replay_v14_9_intent_ranked_scene_reply", flush=True)
+                    print("generation path: replay_v14_10_intent_ranked_scene_reply", flush=True)
                     self.remember_user(chat_id, user_text)
                     self.remember_bot(chat_id, answer)
                     return answer
@@ -422,9 +422,9 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v14_9_policy_fallback_continuity", flush=True)
+                    print("generation path: groq_v14_10_policy_fallback_continuity", flush=True)
                 else:
-                    print("generation path: groq_v14_9_policy_fallback_episode", flush=True)
+                    print("generation path: groq_v14_10_policy_fallback_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)

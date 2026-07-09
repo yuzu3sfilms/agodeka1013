@@ -1057,3 +1057,97 @@ v14.9では、筋トレ相談を **過去ログreplayで答えません**。
 ```
 
 この分離が重要です。
+
+
+---
+
+# v14.10 training tone guard
+
+## 修正した問題
+
+v14.9では筋トレ相談の設計分離は正しかったが、LLM返答が普通のAIトレーナー口調に寄ることがありました。
+
+悪い例:
+
+```text
+リアレイズのフォームについて話していたよ！
+暫定案としては、ダンベルやケーブルを使ったリアレイズを2〜3セット、8〜12回やってみて。
+肩のトレーニングで、痛みや不快感は感じているかな？
+```
+
+これはAIあらくんではなく、やさしいフィットネスGPTです。
+
+## v14.10の修正
+
+### 1. training_tone_guard.py を追加
+
+```text
+training_tone_guard.py
+```
+
+役割:
+
+```text
+AI相談エンジンの返答
+↓
+training_tone_guard
+↓
+AIあらくん寄りに矯正
+```
+
+## 禁止・置換する表現
+
+```text
+暫定案としては
+やってみて
+試してみて
+感じているかな？
+どうかな？
+無理のない範囲で
+おすすめです
+重要です
+```
+
+## 置換例
+
+```text
+暫定案としては、〜やってみて。
+→ 〜やればいいです。
+
+痛みや不快感は感じているかな？
+→ 痛みがあるなら重さを落としてください。
+```
+
+## システムプロンプトも強化
+
+`ai_training_advisor.py` の training system prompt に、以下を追加。
+
+```text
+優等生すぎるAIトレーナー口調は禁止
+「暫定案としては」「やってみて」「感じているかな？」は禁止
+少しぶっきらぼうで実用的
+たまに「あはい」「ぼくぅなら」
+```
+
+## リアレイズ用 fallback も修正
+
+```text
+リアレイズは軽くていいです。
+胸を張りすぎず、肩甲骨を寄せすぎず、肘を外に逃がす感じ。
+重さ欲張ると僧帽筋に逃げます。ぼくぅならケーブルで丁寧にやります。
+```
+
+## 起動ログ
+
+```text
+bot_init: version=v14.10 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True
+```
+
+## generation path
+
+```text
+generation path: training_v14_10_ai_training_form_advice
+generation path: training_v14_10_ai_training_hypertrophy
+generation path: training_v14_10_training_safety
+generation path: replay_v14_10_intent_ranked_scene_reply
+```

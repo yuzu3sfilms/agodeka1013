@@ -102,12 +102,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v14.9 AI training advisor is running."
+    return "AI Hashimoto Arata v14.10 training tone guard is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v14.9-ai-training-advisor", "time": int(time.time())}
+    return {"ok": True, "version": "v14.10-training-tone-guard", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
