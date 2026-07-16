@@ -102,12 +102,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v14.10 training tone guard is running."
+    return "AI Hashimoto Arata v14.11 wake first message fix is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v14.10-training-tone-guard", "time": int(time.time())}
+    return {"ok": True, "version": "v14.11-wake-first-message-fix", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
@@ -149,7 +149,8 @@ def callback():
 
             if is_stop(user_text):
                 bot.remember_user(chat_id, user_text)
-                log("stopped")
+                bot.set_shutdown(chat_id, True)
+                log("stopped: shutdown_state=True")
                 continue
 
             answer = bot.reply(chat_id, user_text)

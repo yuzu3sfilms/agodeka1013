@@ -1151,3 +1151,154 @@ generation path: training_v14_10_ai_training_hypertrophy
 generation path: training_v14_10_training_safety
 generation path: replay_v14_10_intent_ranked_scene_reply
 ```
+
+
+---
+
+# v14.11 wake first message fix
+
+## 修正した問題
+
+シャットダウン状態で、一言目が起動語や相談内容でも無視される問題を修正しました。
+
+悪い挙動:
+
+```text
+shutdown中
+↓
+あらくん、胸トレメニュー作って
+↓
+起動だけして return None
+↓
+一言目が捨てられる
+```
+
+v14.11では、一言目を捨てません。
+
+## 新しい挙動
+
+```text
+message received
+↓
+shutdown中？
+↓
+YES
+  ↓
+  wake判定だけ走らせる
+  ↓
+  wakeしなければ無視
+  ↓
+  wakeしたら shutdown解除
+  ↓
+  return None しない
+  ↓
+  その一言目を通常処理へ流す
+```
+
+## wake対象
+
+```text
+あらくん
+橋本
+橋本新
+顎
+AGODEKA
+起きて
+復活
+戻って
+相談
+筋トレ
+トレーニング
+```
+
+さらに、筋トレ相談は実用機能なので wake 対象です。
+
+```text
+全身鍛えるにはどうしたらいい？
+胸トレメニュー作って
+肩痛いけどリアレイズやっていい？
+```
+
+## 起動だけの短文
+
+```text
+あらくん
+起きて
+橋本
+```
+
+のような短文なら、
+
+```text
+あはい
+```
+
+だけ返して起きます。
+
+## 内容つき呼びかけ
+
+```text
+あらくん、胸トレメニュー作って
+```
+
+なら、
+
+```text
+wake
+↓
+そのまま training advisor
+```
+
+へ流れます。
+
+一言目は捨てません。
+
+## 停止ワード
+
+`app.py` の停止ワード検出時に、
+
+```python
+bot.set_shutdown(chat_id, True)
+```
+
+を呼ぶようにしました。
+
+## 期待ログ
+
+### wakeしない場合
+
+```text
+shutdown_state: True wake_check: False reason=no_wake_signal
+generation path: shutdown_silence
+```
+
+### 起動語だけ
+
+```text
+shutdown_state: True wake_check: True reason=wake_term
+shutdown_state: False wake_consumed_first_message: False
+generation path: wake_v14_11_short_ack
+reply: あはい
+```
+
+### 内容つき呼びかけ
+
+```text
+shutdown_state: True wake_check: True reason=wake_term
+shutdown_state: False wake_consumed_first_message: False
+generation path: training_v14_11_ai_training_program_request
+```
+
+### 筋トレ相談でwake
+
+```text
+shutdown_state: True wake_check: True reason=training_intent
+shutdown_state: False wake_consumed_first_message: False
+generation path: training_v14_11_ai_training_fullbody_program_request
+```
+
+## 起動ログ
+
+```text
+bot_init: version=v14.11 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True
+```

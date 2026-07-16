@@ -16,12 +16,22 @@ from current_state_engine import CurrentStateEngine
 from reply_policy import ReplyPolicy
 from training_advisor import TrainingAdvisor
 from ai_training_advisor import AITrainingAdvisor
+from training_intent import contains_training_intent
 from utils import clean_reply, normalize, de_ai_tone
 
 
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA"]
 ATTENTION_ONLY_TERMS = {"ねえ", "ねぇ", "ちょっと", "おい", "あの", "なあ", "なぁ", "うん", "はい", "なるほど", "ふむ"}
+
+WAKE_TERMS = [
+    "顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA",
+    "起きて", "おきて", "復活", "戻って", "相談", "筋トレ", "トレーニング",
+]
+WAKE_ONLY_TERMS = {
+    "顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA",
+    "起きて", "おきて", "復活", "戻って",
+}
 
 
 class HashimotoArataBot:
@@ -52,19 +62,64 @@ class HashimotoArataBot:
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
         self.last_topic_terms = defaultdict(list)
+        self.shutdown_state = defaultdict(bool)
         self.continuity_seconds = int(os.environ.get("CONTINUITY_SECONDS", "420"))
         self.continuity_min_history = int(os.environ.get("CONTINUITY_MIN_HISTORY", "1"))
         self.continuity_probability = float(os.environ.get("CONTINUITY_REPLY_PROBABILITY", "0.75"))
 
         print(
             "bot_init:",
-            "version=v14.10",
+            "version=v14.11",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
             f"replay_scenes={len(getattr(self.replay_engine, 'scenes', []))}", f"policy=True", f"training=True",
             flush=True,
         )
+
+    def set_shutdown(self, chat_id: str, value: bool = True):
+        self.shutdown_state[chat_id] = bool(value)
+        print("shutdown_state_set:", chat_id, self.shutdown_state[chat_id], flush=True)
+
+    def is_shutdown(self, chat_id: str) -> bool:
+        return bool(self.shutdown_state[chat_id])
+
+    def is_wake_only(self, text: str) -> bool:
+        stripped = (text or "").strip()
+        normalized = normalize(stripped)
+        if not stripped:
+            return False
+        if stripped in WAKE_ONLY_TERMS or normalized in {normalize(x) for x in WAKE_ONLY_TERMS}:
+            return True
+        # Very short direct call.
+        if len(stripped) <= 8 and any(term in stripped for term in CALL_TERMS):
+            return True
+        return False
+
+    def should_wake_from_shutdown(self, text: str):
+        t = text or ""
+        nt = normalize(t)
+
+        if any(term in t for term in WAKE_TERMS):
+            return True, "wake_term"
+
+        if any(normalize(term) in nt for term in WAKE_TERMS):
+            return True, "wake_term_normalized"
+
+        # Practical training feature should be able to wake the bot.
+        if contains_training_intent(t):
+            return True, "training_intent"
+
+        # Safety-related training questions should also wake.
+        training_context = {}
+        try:
+            should, intent, safety = self.ai_training_advisor.should_use(t, context=training_context)
+            if should:
+                return True, "ai_training_should_use"
+        except Exception as e:
+            print("wake_training_check_error:", repr(e), flush=True)
+
+        return False, "no_wake_signal"
 
     def remember_user(self, chat_id: str, text: str):
         self.histories[chat_id].append(text)
@@ -236,6 +291,27 @@ class HashimotoArataBot:
     def reply(self, chat_id: str, user_text: str) -> str | None:
         context = self.context(chat_id, user_text)
 
+        # v14.11: shutdown wake check.
+        # Do not discard the first wake message. If it wakes the bot,
+        # continue into normal processing with the same user_text.
+        if self.is_shutdown(chat_id):
+            wake, reason = self.should_wake_from_shutdown(user_text)
+            print("shutdown_state:", True, "wake_check:", wake, f"reason={reason}", flush=True)
+            if not wake:
+                self.remember_user(chat_id, user_text)
+                print("generation path: shutdown_silence", flush=True)
+                return None
+
+            self.set_shutdown(chat_id, False)
+            print("shutdown_state:", False, "wake_consumed_first_message:", False, flush=True)
+
+            if self.is_wake_only(user_text):
+                answer = "あはい"
+                print("generation path: wake_v14_11_short_ack", flush=True)
+                self.remember_user(chat_id, user_text)
+                self.remember_bot(chat_id, answer)
+                return answer
+
         # v14.9: AI training consultation route first.
         # Training advice is no longer past-log replay or hardcoded menu only.
         # It uses a general AI advisor, while keeping AIあらくん behavior and safety rules.
@@ -249,7 +325,7 @@ class HashimotoArataBot:
             if intent.get("intent") == "log_workout":
                 self.training_advisor.memory.add(chat_id, user_text)
             self.training_advisor._remember_context(chat_id, intent, answer)
-            print(f"generation path: training_v14_10_{training.get('kind', 'advisor')}", flush=True)
+            print(f"generation path: training_v14_11_{training.get('kind', 'advisor')}", flush=True)
             self.remember_user(chat_id, user_text)
             self.remember_bot(chat_id, answer)
             return answer
@@ -336,7 +412,7 @@ class HashimotoArataBot:
                 if guarded != canon:
                     print("style_guard:", guard_info, flush=True)
                 answer = guarded
-                print("generation path: canon_v14_10_policy_answer", flush=True)
+                print("generation path: canon_v14_11_policy_answer", flush=True)
                 self.remember_user(chat_id, user_text)
                 self.remember_bot(chat_id, answer)
                 return answer
@@ -361,7 +437,7 @@ class HashimotoArataBot:
                     if guarded != replay:
                         print("style_guard:", guard_info, flush=True)
                     answer = guarded
-                    print("generation path: replay_v14_10_intent_ranked_scene_reply", flush=True)
+                    print("generation path: replay_v14_11_intent_ranked_scene_reply", flush=True)
                     self.remember_user(chat_id, user_text)
                     self.remember_bot(chat_id, answer)
                     return answer
@@ -422,9 +498,9 @@ class HashimotoArataBot:
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v14_10_policy_fallback_continuity", flush=True)
+                    print("generation path: groq_v14_11_policy_fallback_continuity", flush=True)
                 else:
-                    print("generation path: groq_v14_10_policy_fallback_episode", flush=True)
+                    print("generation path: groq_v14_11_policy_fallback_episode", flush=True)
 
         except Exception as e:
             print("Groq error:", repr(e), flush=True)

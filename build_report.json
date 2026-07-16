@@ -1,24 +1,45 @@
 {
-  "version": "AI_HASHIMOTO_ARATA_v14_10_training_tone_guard",
-  "base": "AI_HASHIMOTO_ARATA_v14_9_ai_training_advisor",
-  "type": "v14-training-tone-fix",
-  "problem": "AI training advisor answered with generic polite fitness-GPT tone instead of AIあらくん behavior.",
-  "new_files": [
-    "training_tone_guard.py"
-  ],
+  "version": "AI_HASHIMOTO_ARATA_v14_11_wake_first_message_fix",
+  "base": "AI_HASHIMOTO_ARATA_v14_10_training_tone_guard",
+  "type": "v14-shutdown-wake-bugfix",
+  "problem": "In shutdown state, first wake message could be discarded instead of being processed.",
   "main_changes": [
-    "Adds post-generation tone guard for training replies",
-    "Bans/rewrites generic AI trainer phrases such as 暫定案としては, やってみて, 感じているかな？",
-    "Strengthens AITrainingAdvisor system prompt with explicit bad/good tone examples",
-    "Adds more AIあらくん-like fallback for rear-delt raise form advice"
+    "Adds per-chat shutdown_state in bot.py",
+    "STOP_WORDS in app.py now call bot.set_shutdown(chat_id, True)",
+    "Adds should_wake_from_shutdown()",
+    "Wake terms and training intents can wake the bot",
+    "Wake message is not consumed; it continues into normal processing",
+    "Wake-only short messages return あはい"
   ],
-  "bad_example": "暫定案としては、ダンベルやケーブルを使ったリアレイズを2〜3セット、8〜12回やってみて。肩のトレーニングで、痛みや不快感は感じているかな？",
-  "fixed_example": "リアレイズは軽くていいです。胸を張りすぎず、肩甲骨を寄せすぎず、肘を外に逃がす感じ。重さ欲張ると僧帽筋に逃げます。ぼくぅならケーブルで丁寧にやります。",
-  "expected_startup_log": "bot_init: version=v14.10 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True",
-  "expected_training_paths": [
-    "generation path: training_v14_10_ai_training_form_advice",
-    "generation path: training_v14_10_ai_training_hypertrophy",
-    "generation path: training_v14_10_training_safety"
+  "wake_terms": [
+    "顎",
+    "アゴ",
+    "橋本",
+    "橋本新",
+    "あらくん",
+    "あらた",
+    "AGODEKA",
+    "起きて",
+    "おきて",
+    "復活",
+    "戻って",
+    "相談",
+    "筋トレ",
+    "トレーニング"
+  ],
+  "local_tests": {
+    "shutdown + 普通の雑談": "shutdown_silence",
+    "shutdown + あらくん": "wake_v14_11_short_ack -> あはい",
+    "shutdown + あらくん、胸トレメニュー作って": "wake then training_v14_11_ai_training_program_request",
+    "shutdown + 全身鍛えるにはどうしたらいい？": "wake reason=training_intent then training_v14_11_ai_training_fullbody_program_request"
+  },
+  "expected_startup_log": "bot_init: version=v14.11 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True",
+  "expected_paths": [
+    "generation path: shutdown_silence",
+    "generation path: wake_v14_11_short_ack",
+    "generation path: training_v14_11_ai_training_program_request",
+    "generation path: training_v14_11_ai_training_fullbody_program_request",
+    "generation path: replay_v14_11_intent_ranked_scene_reply"
   ],
   "scene_stats": {
     "n_messages": 108530,
