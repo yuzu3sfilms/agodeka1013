@@ -1,3 +1,7 @@
+# AI_HASHIMOTO_ARATA v14.13
+
+Evidence-first conversation routing. See `UPDATE_v14_13.md` for the architectural changes and regression cases.
+
 # AI_HASHIMOTO_ARATA v14.3 current-state policy
 
 ## 目的

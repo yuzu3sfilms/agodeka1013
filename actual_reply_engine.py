@@ -66,7 +66,7 @@ class ActualReplyEngine:
         self.data_dir = Path(data_dir)
         self.scene_path = self.data_dir / "conversation_scenes.jsonl.gz"
         self.max_items = int(os.environ.get("REPLAY_MAX_SCENES", "5546"))
-        self.min_score = int(os.environ.get("REPLAY_MIN_SCORE", "80"))
+        self.min_score = int(os.environ.get("REPLAY_MIN_SCORE", "120"))
         self.scenes = []
         self._load()
 
@@ -91,25 +91,36 @@ class ActualReplyEngine:
             return True
         return False
 
-    def _query_state(self, user_text: str, context: str, topic_terms=None):
-        topic_terms = topic_terms or []
-        recent_context = "\n".join((context or "").splitlines()[-8:])
-        text = recent_context + "\n" + (user_text or "") + "\n" + " ".join(topic_terms)
-        tokens = extract_tokens(text)
-        for t in topic_terms:
-            if t:
-                tokens.append(t)
+    def _query_state(self, user_text: str, context: str, topic_terms=None, context_topic_terms=None, intent: str = ""):
+        """Build separate evidence channels.
+
+        v14.13 deliberately does not merge previous topics into the user's text.
+        Only lexical anchors present in the current utterance may open replay.
+        Conversational topics can rank an already-grounded scene, but can never
+        make an otherwise ungrounded scene eligible.
+        """
+        topic_terms = list(topic_terms or [])
+        context_topic_terms = list(context_topic_terms or [])
+        current_tokens = list(dict.fromkeys(extract_tokens(user_text or "")))
+        recent_context = "\n".join((context or "").splitlines()[-6:])
         speakers = []
         for line in recent_context.splitlines():
             if ":" in line:
                 speakers.append(line.split(":", 1)[0])
         return {
-            "text": text,
-            "tokens": list(dict.fromkeys(tokens)),
-            "speakers": list(dict.fromkeys(speakers[-8:])),
+            "current_text": user_text or "",
+            "current_tokens": current_tokens,
+            "speakers": list(dict.fromkeys(speakers[-6:])),
             "is_question": bool(re.search(r"[？?]|何|なに|誰|どこ|いつ|なんで|どう", user_text or "")),
             "topic_terms": topic_terms,
+            "context_topic_terms": context_topic_terms,
+            "intent": intent or "",
         }
+
+    @staticmethod
+    def _exact_anchor_set(scene: dict):
+        values = list(scene.get("anchors", []) or []) + list(scene.get("reply_tokens", []) or [])
+        return {normalize(v) for v in values if normalize(v)}
 
     def _unsupported_assertion(self, reply: str, source_scene: str):
         for w in ASSERTION_WORDS:
@@ -117,55 +128,57 @@ class ActualReplyEngine:
                 return w
         return None
 
-    def score_scene(self, scene: dict, user_text: str, context: str, topic_terms=None):
+    def score_scene(self, scene: dict, user_text: str, context: str, topic_terms=None, context_topic_terms=None, intent: str = ""):
         reply = scene.get("reply", "")
         if self._is_bad_replay(reply):
             return None
 
-        q = self._query_state(user_text, context, topic_terms)
-        if not q["tokens"] and not q["speakers"]:
+        q = self._query_state(user_text, context, topic_terms, context_topic_terms, intent)
+        # Evidence gate: vague reactions, refusals and stop signals are never
+        # mapped to a historical scene. They are handled by current-state logic.
+        if q["intent"] in {"stop", "reaction_ping", "attention_ping"}:
             return None
 
         scene_text = scene.get("scene") or scene.get("context", "")
-        nscene = normalize(scene_text)
-        anchors = set(scene.get("anchors", []) or scene.get("tokens", []) or [])
-        reply_tokens = set(scene.get("reply_tokens", []) or [])
+        anchors = self._exact_anchor_set(scene)
+        current_norm = [normalize(t) for t in q["current_tokens"] if normalize(t)]
+        exact_current_matches = [t for t, nt in zip(q["current_tokens"], current_norm) if nt in anchors]
+
+        # A replay candidate must be grounded in at least one exact lexical anchor
+        # from the CURRENT message. Speaker overlap, a previous topic, a question
+        # mark, or a substring inside a conjugated phrase cannot open this gate.
+        if not exact_current_matches:
+            return None
+
+        reply_tokens = {normalize(x) for x in (scene.get("reply_tokens", []) or []) if normalize(x)}
         scene_speakers = set(scene.get("speakers", []) or scene.get("prev_speakers", []) or [])
 
-        score = 0
-        reasons = []
-        matches = []
+        score = 70
+        reasons = ["evidence_gate:exact_current_anchor"]
+        matches = list(dict.fromkeys(exact_current_matches))
 
-        # Token overlap with whole scene, not only direct prev line.
-        for t in q["tokens"]:
+        for t in matches:
             nt = normalize(t)
-            if not nt:
-                continue
-            in_anchor = any(normalize(a) == nt for a in anchors)
-            in_scene = nt in nscene
-            in_reply = any(normalize(rt) == nt for rt in reply_tokens)
+            score += 20 + min(len(nt), 10) * 3
+            reasons.append(f"current_anchor:{t}")
+            if nt in reply_tokens:
+                score += 28
+                reasons.append(f"current_anchor_in_reply:{t}")
 
-            if in_anchor or in_scene:
-                add = 16 + min(len(nt), 8) * 2
-                score += add
-                matches.append(t)
-            if in_reply:
-                # If the user's actual wording appears in Hashimoto's real reply,
-                # this is usually the best replay candidate.
-                score += 42
-                reasons.append(f"reply_token:{t}")
-
-        if matches:
-            reasons.append("scene_overlap:" + ",".join(matches[:6]))
-
-        # Topic terms are strong, but they can appear anywhere in the scene.
+        # Current-message topic terms strengthen an already-open candidate only.
         for t in q["topic_terms"]:
-            if t and normalize(t) in nscene:
-                score += 42
-                reasons.append(f"topic_scene:{t}")
-            if t and any(normalize(rt) == normalize(t) for rt in reply_tokens):
-                score += 20
-                reasons.append(f"topic_reply:{t}")
+            nt = normalize(t)
+            if nt and nt in anchors:
+                score += 24
+                reasons.append(f"current_topic_anchor:{t}")
+
+        # Inherited context topics are weak ranking evidence. They never qualify
+        # a scene on their own and therefore cannot recreate an augmented query.
+        for t in q["context_topic_terms"]:
+            nt = normalize(t)
+            if nt and nt in anchors:
+                score += 6
+                reasons.append(f"context_topic_support:{t}")
 
         # Speaker overlap. Useful in group LINE because the target may be several messages back.
         speaker_hits = []
@@ -265,10 +278,10 @@ class ActualReplyEngine:
             "source_after": "\n".join(scene.get("after", [])[:4]),
         }
 
-    def search(self, user_text: str, context: str = "", topic_terms=None, limit: int = 6):
+    def search(self, user_text: str, context: str = "", topic_terms=None, context_topic_terms=None, intent: str = "", limit: int = 6):
         results = []
         for scene in self.scenes:
-            s = self.score_scene(scene, user_text, context, topic_terms=topic_terms)
+            s = self.score_scene(scene, user_text, context, topic_terms=topic_terms, context_topic_terms=context_topic_terms, intent=intent)
             if s:
                 results.append(s)
         results.sort(key=lambda x: x["score"], reverse=True)
@@ -285,8 +298,15 @@ class ActualReplyEngine:
                 break
         return out
 
-    def choose(self, user_text: str, context: str = "", topic_terms=None):
-        hits = self.search(user_text, context, topic_terms=topic_terms, limit=6)
+    def choose(self, user_text: str, context: str = "", topic_terms=None, context_topic_terms=None, intent: str = ""):
+        hits = self.search(
+            user_text,
+            context,
+            topic_terms=topic_terms,
+            context_topic_terms=context_topic_terms,
+            intent=intent,
+            limit=6,
+        )
         if not hits:
             return None, {"used": False, "reason": "no_scene_replay_hit", "hits": []}
         best = hits[0]

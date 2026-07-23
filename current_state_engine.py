@@ -6,7 +6,7 @@ from query_intent import intent_profile
 
 
 CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA"]
-STOP_TERMS = ["もういい", "黙って", "だまって", "終わり", "終了", "関係ない", "別の話", "停止"]
+STOP_TERMS = ["もういい", "黙って", "だまって", "やめて", "やめろ", "終わり", "終了", "関係ない", "別の話", "停止"]
 ATTENTION_ONLY_TERMS = {"ねえ", "ねぇ", "ちょっと", "おい", "あの", "うん", "はい", "なるほど", "ふむ", "なあ", "なぁ", "うん", "はい", "なるほど", "ふむ"}
 
 QUESTION_RE = re.compile(r"[？?]|何|なに|誰|だれ|どこ|いつ|なんで|なぜ|どう|何個|何人|何枚|何回|いくつ")
@@ -92,6 +92,8 @@ class CurrentStateEngine:
             intent = "canon_question"
         elif exact_answer_cue:
             intent = "exact_answer_question"
+        elif reaction_like:
+            intent = "reaction_ping"
         elif nostalgia_cue or expand_cue:
             intent = "episode_expand"
         elif is_question:
@@ -102,8 +104,6 @@ class CurrentStateEngine:
             intent = "attention_ping"
         elif bare_topic:
             intent = "topic_ping"
-        elif reaction_like:
-            intent = "reaction_ping"
         elif short:
             intent = "short_chat"
         else:
@@ -128,6 +128,8 @@ class CurrentStateEngine:
             preferred_route = "canon"
         elif exact_answer_cue:
             preferred_route = "canon_then_scene"
+        elif reaction_like:
+            preferred_route = "fallback_only"
         elif nostalgia_cue or expand_cue:
             preferred_route = "episode_expand"
         elif attention_only:

@@ -72,7 +72,7 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.12.1",
+            "version=v14.13",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
@@ -223,6 +223,19 @@ class HashimotoArataBot:
         return system, user
 
 
+    def remove_unverified_vocative(self, text: str, speaker: SpeakerProfile) -> str:
+        """Block generated forms of address that are not licensed by replay evidence.
+
+        Speaker resolution identifies who spoke; it does not prove how Hashimoto
+        addresses that person. Generated fallback replies therefore use no vocative.
+        """
+        out = (text or "").strip()
+        labels = [speaker.address, speaker.canonical_name, speaker.display_name, *speaker.aliases]
+        for label in sorted({x.strip() for x in labels if x and x.strip()}, key=len, reverse=True):
+            # Remove only a leading vocative, never occurrences inside substantive text.
+            out = re.sub(rf"^(?:{re.escape(label)})(?:さん|くん|君)?[、,\s]+", "", out).strip()
+        return out
+
     def groq_available(self) -> bool:
         return time.time() >= self.groq_disabled_until
 
@@ -346,16 +359,12 @@ class HashimotoArataBot:
             self.remember_bot(chat_id, answer)
             return answer
 
+        # v14.13 evidence-first routing:
+        # Never mutate the live utterance by appending a previous topic.
+        # Current text and conversational topic remain separate evidence channels.
         raw_result = self.searcher.search(user_text)
-        inherited_topic = False
-        if self.should_inherit_topic(chat_id, user_text, raw_result):
-            inherited_topic = True
-            inherited_text = user_text + " " + " ".join(self.last_topic_terms[chat_id])
-            print("topic_inherit:", self.last_topic_terms[chat_id], "augmented_text=", inherited_text, flush=True)
-            raw_result = self.searcher.search(inherited_text)
-
         result = self.ranker.rerank(user_text, raw_result, max_selected=2)
-        result["inherited_topic"] = inherited_topic
+        result["inherited_topic"] = False
 
         state = self.current_state.classify(
             user_text=user_text,
@@ -363,19 +372,6 @@ class HashimotoArataBot:
             last_topic_terms=self.last_topic_terms[chat_id],
             search_result=result,
         )
-        if state.get("inherited_topic") and not inherited_topic:
-            inherited_topic = True
-            inherited_text = user_text + " " + " ".join(state.get("topic_terms", []))
-            print("state_topic_inherit:", state.get("topic_terms", []), "augmented_text=", inherited_text, flush=True)
-            raw_result = self.searcher.search(inherited_text)
-            result = self.ranker.rerank(user_text, raw_result, max_selected=2)
-            result["inherited_topic"] = True
-            state = self.current_state.classify(
-                user_text=user_text,
-                history=list(self.histories[chat_id]),
-                last_topic_terms=self.last_topic_terms[chat_id],
-                search_result=result,
-            )
 
         called = state.get("called", False)
         question = state.get("question", False)
@@ -445,7 +441,9 @@ class HashimotoArataBot:
                 replay, replay_info = self.replay_engine.choose(
                     user_text=user_text,
                     context=context,
-                    topic_terms=state.get("topic_terms") or result.get("topic_terms", []),
+                    topic_terms=result.get("topic_terms", []),
+                    context_topic_terms=(state.get("topic_terms", []) if state.get("inherited_topic") else []),
+                    intent=state.get("intent", ""),
                 )
                 print("replay_engine:", replay_info, flush=True)
                 if replay:
@@ -501,6 +499,7 @@ class HashimotoArataBot:
                 guarded, guard_info = guard_reply(cand_clean, user_text)
                 if guarded != cand_clean:
                     print("style_guard_candidate:", guard_info, "orig=", cand_clean, "guarded=", guarded, flush=True)
+                guarded = self.remove_unverified_vocative(guarded, speaker)
                 if guarded:
                     cleaned_candidates.append(guarded)
 
