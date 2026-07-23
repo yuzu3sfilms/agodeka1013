@@ -18,6 +18,7 @@ from training_advisor import TrainingAdvisor
 from ai_training_advisor import AITrainingAdvisor
 from training_intent import contains_training_intent
 from speaker_resolver import SpeakerResolver, SpeakerProfile
+from shutdown_state import ShutdownStateStore
 from utils import clean_reply, normalize, de_ai_tone
 
 
@@ -64,14 +65,14 @@ class HashimotoArataBot:
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
         self.last_topic_terms = defaultdict(list)
-        self.shutdown_state = defaultdict(bool)
+        self.shutdown_store = ShutdownStateStore()
         self.continuity_seconds = int(os.environ.get("CONTINUITY_SECONDS", "420"))
         self.continuity_min_history = int(os.environ.get("CONTINUITY_MIN_HISTORY", "1"))
         self.continuity_probability = float(os.environ.get("CONTINUITY_REPLY_PROBABILITY", "0.75"))
 
         print(
             "bot_init:",
-            "version=v14.12",
+            "version=v14.12.1",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
@@ -80,11 +81,13 @@ class HashimotoArataBot:
         )
 
     def set_shutdown(self, chat_id: str, value: bool = True):
-        self.shutdown_state[chat_id] = bool(value)
-        print("shutdown_state_set:", chat_id, self.shutdown_state[chat_id], flush=True)
+        self.shutdown_store.set(chat_id, bool(value))
+        print("shutdown_state_set:", chat_id, bool(value), "store=sqlite", flush=True)
 
     def is_shutdown(self, chat_id: str) -> bool:
-        return bool(self.shutdown_state[chat_id])
+        value = self.shutdown_store.get(chat_id)
+        print("shutdown_state_get:", chat_id, value, "store=sqlite", flush=True)
+        return value
 
     def is_wake_only(self, text: str) -> bool:
         stripped = (text or "").strip()
