@@ -3,7 +3,8 @@ import re
 
 TRAINING_KEYWORDS = [
     "筋トレ", "トレーニング", "ワークアウト", "メニュー", "セット", "レップ", "rep", "reps",
-    "ベンチ", "スクワット", "デッド", "懸垂", "腕立て", "腹筋", "背筋", "ダンベル",
+    "ベンチ", "スクワット", "デッド", "懸垂", "腕立て", "腹筋", "背筋", "ダンベル", "ケーブル",
+    "ケーブルロウ", "ロウ", "ローイング", "ラットプル", "プレス", "カール", "フライ", "レイズ",
     "胸", "背中", "脚", "足", "肩", "腕", "二頭", "三頭", "腹", "尻",
     "増量", "減量", "カロリー", "タンパク", "たんぱく", "プロテイン",
     "筋肉痛", "フォーム", "重量", "MAX", "マックス", "有酸素", "休養",
@@ -46,15 +47,31 @@ def classify_training_intent(text: str, last_training_context: dict | None = Non
     last_training_context = last_training_context or {}
 
     question_like = bool(re.search(r"[？?]|何回|なんかい|何レップ|何セット|どう|やれば|すれば|いいの|いい？|よい？", t))
-    followup_only = stripped in {"？", "?", "うん", "はい", "なるほど", "ふむ", "ほう", "で", "それで", "続き", "他の日は？", "他の日は"}
+    followup_normalized = re.sub(r"[？?！!。\s]+$", "", stripped)
+    followup_only = followup_normalized in {
+        "", "うん", "はい", "なるほど", "ふむ", "ほう", "で", "それで", "続き",
+    }
     in_training_context = bool(last_training_context)
 
     explicit_training_topic = contains_training_intent(t)
     fullbody_topic = any(k in t for k in ["全身", "全部位", "フルボディ", "全身法", "全身鍛える"])
     other_day_question = bool(re.search(r"他の日|別の日|翌日|次の日|週間|週メニュー|週のメニュー|分割", t))
 
-    if not explicit_training_topic and not (in_training_context and (question_like or followup_only or other_day_question)):
-        return {"is_training": False, "intent": "none", "parts": [], "is_log": False}
+    # A previous workout topic alone must never turn an arbitrary question into
+    # a training question.  Context inheritance is limited to a tiny whitelist
+    # of genuinely context-dependent follow-ups (e.g. "それで？", "他の日は？").
+    # This prevents messages such as "ぽつお日本橋？" from entering training mode.
+    context_followup = in_training_context and (followup_only or other_day_question)
+    if not explicit_training_topic and not context_followup:
+        return {
+            "is_training": False,
+            "intent": "none",
+            "parts": [],
+            "is_log": False,
+            "question_like": question_like,
+            "inherited_training_context": False,
+            "reason": "no_current_training_signal",
+        }
 
     parts = []
     for part, keys in BODY_PARTS.items():
@@ -118,5 +135,5 @@ def classify_training_intent(text: str, last_training_context: dict | None = Non
         "parts": parts,
         "is_log": is_log and not question_like,
         "question_like": question_like,
-        "inherited_training_context": in_training_context and not contains_training_intent(t),
+        "inherited_training_context": context_followup and not explicit_training_topic,
     }
