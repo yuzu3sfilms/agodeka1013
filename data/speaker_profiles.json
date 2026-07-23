@@ -1,0 +1,42 @@
+{
+  "version": "v14.12",
+  "policy": {
+    "use_address_only_when_natural": true,
+    "forbid_generic_second_person": ["あなた", "君", "きみ"],
+    "unknown_sender": "omit_subject",
+    "notes": "呼称候補はLINEログの表示名・既知のあだ名を基礎にした初期版。line_user_mapは実運用で固定可能。"
+  },
+  "line_user_map": {},
+  "profiles": [
+    {
+      "canonical_name": "Reiji Shioda",
+      "aliases": ["Reiji Shioda", "Reiji", "Shioda", "塩田", "れいじ", "レイジ"],
+      "addresses_from_arata": ["塩田", "れいじ"],
+      "preferred_address": "塩田"
+    },
+    {
+      "canonical_name": "Ryo Sekiguchi",
+      "aliases": ["Ryo Sekiguchi", "Sekiguchi", "関口", "せっきー", "せき", "せっき"],
+      "addresses_from_arata": ["せっきー", "関口"],
+      "preferred_address": "せっきー"
+    },
+    {
+      "canonical_name": "村田",
+      "aliases": ["村田", "ムタ", "むた", "ムラタ"],
+      "addresses_from_arata": ["ムタ", "村田"],
+      "preferred_address": "ムタ"
+    },
+    {
+      "canonical_name": "坂口",
+      "aliases": ["坂口", "さかぐち", "サカグチ"],
+      "addresses_from_arata": ["坂口"],
+      "preferred_address": "坂口"
+    },
+    {
+      "canonical_name": "中山 貴文",
+      "aliases": ["中山 貴文", "中山", "ぽつお", "ぽつぉ", "ぽつおこ"],
+      "addresses_from_arata": ["ぽつお", "中山"],
+      "preferred_address": "ぽつお"
+    }
+  ]
+}

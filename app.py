@@ -17,6 +17,7 @@ DEBUG = os.environ.get("DEBUG_LOG", "1") == "1"
 
 app = Flask(__name__)
 bot = HashimotoArataBot()
+SENDER_NAME_CACHE = {}
 
 
 STOP_WORDS = [
@@ -45,6 +46,39 @@ def get_chat_id(event: dict) -> str:
     source = event.get("source", {})
     return source.get("groupId") or source.get("roomId") or source.get("userId") or "unknown"
 
+
+
+def get_sender_id(event: dict) -> str:
+    return event.get("source", {}).get("userId", "")
+
+
+def get_sender_display_name(event: dict) -> str:
+    source = event.get("source", {})
+    user_id = source.get("userId", "")
+    if not user_id:
+        return ""
+    if user_id in SENDER_NAME_CACHE:
+        return SENDER_NAME_CACHE[user_id]
+
+    source_type = source.get("type")
+    if source_type == "group" and source.get("groupId"):
+        url = f"https://api.line.me/v2/bot/group/{source['groupId']}/member/{user_id}"
+    elif source_type == "room" and source.get("roomId"):
+        url = f"https://api.line.me/v2/bot/room/{source['roomId']}/member/{user_id}"
+    else:
+        url = f"https://api.line.me/v2/bot/profile/{user_id}"
+
+    try:
+        res = requests.get(url, headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"}, timeout=6)
+        if 200 <= res.status_code < 300:
+            name = (res.json().get("displayName") or "").strip()
+            if name:
+                SENDER_NAME_CACHE[user_id] = name
+                return name
+        log("LINE profile error:", res.status_code, res.text[:200])
+    except Exception as e:
+        log("LINE profile exception:", repr(e))
+    return ""
 
 def is_stop(text: str) -> bool:
     nt = normalize(text)
@@ -102,12 +136,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v14.11 wake first message fix is running."
+    return "AI Hashimoto Arata v14.12 speaker recognition is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v14.11-wake-first-message-fix", "time": int(time.time())}
+    return {"ok": True, "version": "v14.12-speaker-recognition", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
@@ -145,7 +179,10 @@ def callback():
             user_text = message.get("text", "")
             chat_id = get_chat_id(event)
             log("received:", user_text)
+            sender_id = get_sender_id(event)
+            sender_display_name = get_sender_display_name(event)
             log("chat_id:", chat_id)
+            log("sender:", sender_id, sender_display_name)
 
             if is_stop(user_text):
                 bot.remember_user(chat_id, user_text)
@@ -153,7 +190,7 @@ def callback():
                 log("stopped: shutdown_state=True")
                 continue
 
-            answer = bot.reply(chat_id, user_text)
+            answer = bot.reply(chat_id, user_text, sender_id=sender_id, sender_display_name=sender_display_name)
 
             if answer is None:
                 log("ignored: no episode")

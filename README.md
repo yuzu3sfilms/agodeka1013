@@ -1302,3 +1302,19 @@ generation path: training_v14_11_ai_training_fullbody_program_request
 ```text
 bot_init: version=v14.11 persona_judge=True persona_profile_loaded=True topic_canon_loaded=True replay_scenes=5546 policy=True training=True
 ```
+
+## v14.12 Speaker Recognition / Learned Addressing
+
+- LINE webhookの`userId`とプロフィール表示名を取得する。
+- `speaker_resolver.py`が`data/speaker_profiles.json`と照合する。
+- 一致した相手には、過去ログ由来の呼称候補をAI生成プロンプトへ渡す。
+- 呼称は毎回使わず、自然に必要な場合だけ使う。
+- 未特定の相手には名前を推測せず、「あなた」「君」を避けて主語を省略する。
+- 安定運用では`line_user_map`へLINE userIdとcanonical_nameを手動登録できる。
+
+期待ログ:
+
+```text
+sender: Uxxxxxxxx Reiji Shioda
+speaker_resolution: {'canonical': 'Reiji Shioda', 'address': '塩田', 'confidence': 0.96, 'source': 'display_name_exact'}
+```

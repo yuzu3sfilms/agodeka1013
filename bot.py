@@ -17,6 +17,7 @@ from reply_policy import ReplyPolicy
 from training_advisor import TrainingAdvisor
 from ai_training_advisor import AITrainingAdvisor
 from training_intent import contains_training_intent
+from speaker_resolver import SpeakerResolver, SpeakerProfile
 from utils import clean_reply, normalize, de_ai_tone
 
 
@@ -58,6 +59,7 @@ class HashimotoArataBot:
         self.reply_policy = ReplyPolicy()
         self.training_advisor = TrainingAdvisor()
         self.ai_training_advisor = AITrainingAdvisor(client=self.client, model=self.model, memory=self.training_advisor.memory)
+        self.speaker_resolver = SpeakerResolver()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
@@ -69,7 +71,7 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.11",
+            "version=v14.12",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
@@ -189,7 +191,7 @@ class HashimotoArataBot:
         rng = random.Random(seed)
         return rng.random() < self.continuity_probability
 
-    def fallback_prompt(self, user_text: str, context: str, chat_id: str, question: bool):
+    def fallback_prompt(self, user_text: str, context: str, chat_id: str, question: bool, speaker: SpeakerProfile):
         relation_style = "\n".join(self.relationships.style_samples(n=4))
         system = (
             "橋本新本人風のAIアカウントとしてLINEで短く返す。"
@@ -203,6 +205,9 @@ class HashimotoArataBot:
         user = f"""mode:{'Q' if question else 'continue'}
 発言:{user_text}
 直近:{context}
+
+相手情報:
+{speaker.prompt_block()}
 
 口調サンプル:
 {relation_style}
@@ -221,7 +226,7 @@ class HashimotoArataBot:
     def disable_groq(self):
         self.groq_disabled_until = time.time() + self.cooldown_seconds
 
-    def build_prompt(self, user_text: str, context: str, search_result: dict, chat_id: str):
+    def build_prompt(self, user_text: str, context: str, search_result: dict, chat_id: str, speaker: SpeakerProfile):
         episode_block = self.searcher.format_episodes(search_result)
         style_from_episode = self.searcher.format_style(search_result)
         relation_block = self.relationships.format()
@@ -254,6 +259,10 @@ class HashimotoArataBot:
 
         user = f"""mode:{'Q' if question else 'react'}
 発言:{user_text}
+
+相手情報:
+{speaker.prompt_block()}
+
 語:{terms}
 本題語:{topic_terms}
 述語:{predicates}
@@ -288,8 +297,10 @@ class HashimotoArataBot:
 橋本新として、短い候補を4つ出す。"""
         return system, user
 
-    def reply(self, chat_id: str, user_text: str) -> str | None:
+    def reply(self, chat_id: str, user_text: str, sender_id: str | None = None, sender_display_name: str | None = None) -> str | None:
         context = self.context(chat_id, user_text)
+        speaker = self.speaker_resolver.resolve(sender_id=sender_id, display_name=sender_display_name)
+        print("speaker_resolution:", {"canonical": speaker.canonical_name, "display": speaker.display_name, "address": speaker.address, "confidence": speaker.confidence, "source": speaker.source}, flush=True)
 
         # v14.11: shutdown wake check.
         # Do not discard the first wake message. If it wakes the bot,
@@ -316,6 +327,8 @@ class HashimotoArataBot:
         # Training advice is no longer past-log replay or hardcoded menu only.
         # It uses a general AI advisor, while keeping AIあらくん behavior and safety rules.
         training_context = self.training_advisor._context(chat_id)
+        training_context = dict(training_context or {})
+        training_context["speaker_instruction"] = speaker.prompt_block()
         training = self.ai_training_advisor.answer(chat_id, user_text, context=training_context)
         print("ai_training_advisor:", {k: v for k, v in training.items() if k != "answer"}, flush=True)
         if training.get("used"):
@@ -460,9 +473,9 @@ class HashimotoArataBot:
 
         try:
             if no_relevant_episode:
-                system, user = self.fallback_prompt(user_text, context, chat_id, question)
+                system, user = self.fallback_prompt(user_text, context, chat_id, question, speaker)
             else:
-                system, user = self.build_prompt(user_text, context, result, chat_id)
+                system, user = self.build_prompt(user_text, context, result, chat_id, speaker)
             res = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
