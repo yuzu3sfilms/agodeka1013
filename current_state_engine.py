@@ -52,7 +52,7 @@ class CurrentStateEngine:
         nt = normalize(text)
         return any(normalize(t) in nt for t in STOP_TERMS)
 
-    def classify(self, user_text: str, history=None, last_topic_terms=None, search_result=None):
+    def classify(self, user_text: str, history=None, last_topic_terms=None, search_result=None, is_first_message: bool = False):
         history = list(history or [])
         last_topic_terms = list(last_topic_terms or [])
         search_result = search_result or {}
@@ -114,6 +114,9 @@ class CurrentStateEngine:
         should_consider_reply = False
         if stopped:
             should_consider_reply = False
+        elif is_first_message:
+            # The first incoming utterance is real input, not a wake token to discard.
+            should_consider_reply = True
         elif called or is_question or bare_topic or reaction_like or attention_only:
             should_consider_reply = True
         elif search_result.get("episodes"):
@@ -124,6 +127,10 @@ class CurrentStateEngine:
         # Preferred route
         if stopped:
             preferred_route = "silence"
+        elif is_first_message and reaction_like:
+            preferred_route = "fallback_only"
+        elif is_first_message and short and not is_question:
+            preferred_route = "scene_then_fallback"
         elif is_count_question:
             preferred_route = "canon"
         elif exact_answer_cue:
@@ -161,5 +168,6 @@ class CurrentStateEngine:
             "last_topic_terms": last_topic_terms[:4],
             "should_consider_reply": should_consider_reply,
             "recent_history_size": len(history),
+            "is_first_message": bool(is_first_message),
         }
         return state

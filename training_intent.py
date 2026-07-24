@@ -1,16 +1,29 @@
 import re
 
-
-TRAINING_KEYWORDS = [
-    "筋トレ", "トレーニング", "ワークアウト", "メニュー", "セット", "レップ", "rep", "reps",
-    "ベンチ", "スクワット", "デッド", "懸垂", "腕立て", "腹筋", "背筋", "ダンベル", "ケーブル",
-    "ケーブルロウ", "ロウ", "ローイング", "ラットプル", "プレス", "カール", "フライ", "レイズ",
-        "増量", "減量", "カロリー", "タンパク", "たんぱく", "プロテイン",
-    "筋肉痛", "フォーム", "重量", "MAX", "マックス", "有酸素", "休養",
-    "全身", "全部位", "フルボディ", "全身法", "全身鍛える",
-    "ジム", "今日は胸", "今日胸", "今日脚", "今日肩", "今日背中", "今日腕",
-    "ステロイド", "アナボリック", "テストステロン", "成長ホルモン", "SARMs", "サーム", "クレンブテロール",
+# Domain evidence and conversational intent are deliberately separated.
+# A body part alone is NOT a training request.
+STRONG_TRAINING_TERMS = [
+    "筋トレ", "トレーニング", "ワークアウト", "ジム", "全身法", "フルボディ",
+    "ベンチプレス", "スクワット", "デッドリフト", "懸垂", "腕立て", "ダンベル",
+    "ケーブルロウ", "ローイング", "ラットプル", "ショルダープレス", "サイドレイズ",
+    "リアレイズ", "カール", "フライ", "プッシュダウン", "ブルガリアンスクワット",
+    "筋肥大", "増量", "減量", "プロテイン", "有酸素", "1rm", "max",
+    "ステロイド", "アナボリック", "sarms", "サーム", "クレンブテロール",
 ]
+
+BODY_PART_TERMS = [
+    "胸", "大胸筋", "背中", "広背筋", "脚", "下半身", "肩", "三角筋",
+    "腕", "二頭", "三頭", "腹", "腹筋", "体幹", "尻", "臀部",
+]
+
+TRAINING_REQUEST_CUES = [
+    "教えて", "どうすれば", "どうしたら", "どうやる", "やり方", "フォーム", "メニュー",
+    "組んで", "何回", "何レップ", "何セット", "何kg", "何キロ", "重量", "回数", "セット数",
+    "効かせ", "効いて", "鍛え", "でかく", "デカく", "増やしたい", "減らしたい",
+    "おすすめ", "どれがいい", "何やる", "今日何", "週何回", "休養", "頻度",
+]
+
+TRAINING_LOG_CUES = ["記録", "メモ", "やった", "完了", "終わった"]
 
 LOG_PATTERNS = [
     r"(ベンチ|スクワット|デッド|懸垂|ダンベル|プレス|カール|フライ|ロー|ラット|レッグ)",
@@ -23,47 +36,60 @@ BODY_PARTS = {
     "fullbody": ["全身", "全部位", "フルボディ", "全身法", "全身鍛える"],
     "chest": ["胸", "大胸筋", "ベンチ", "プレス", "フライ"],
     "back": ["背中", "広背筋", "懸垂", "ラット", "ロー", "デッド"],
-    "legs": ["脚", "足", "下半身", "スクワット", "レッグ", "ブルガリアン"],
-    "shoulders": ["肩", "三角筋", "サイドレイズ", "ショルダー"],
+    "legs": ["脚", "下半身", "スクワット", "レッグ", "ブルガリアン"],
+    "shoulders": ["肩", "三角筋", "サイドレイズ", "リアレイズ", "ショルダー"],
     "arms": ["腕", "二頭", "三頭", "カール", "プッシュダウン"],
     "core": ["腹", "腹筋", "体幹", "プランク"],
+    "glutes": ["尻", "臀部", "ヒップスラスト"],
 }
 
 
+def _contains_any(text: str, terms) -> bool:
+    low = (text or "").lower()
+    return any(term.lower() in low for term in terms)
+
+
+def _has_log_pattern(text: str) -> bool:
+    return any(re.search(p, text or "", re.I) for p in LOG_PATTERNS)
+
+
 def contains_training_intent(text: str) -> bool:
-    t=text or ""
-    consult=bool(re.search(r"(教えて|どう|方法|フォーム|メニュー|何回|何セット|重量|kg|キロ|レップ|セット|おすすめ|すべき)",t))
-    exercise=any(k.lower() in t.lower() for k in TRAINING_KEYWORDS)
-    if exercise:
+    """Return True only when both domain and purpose support training routing.
+
+    Strong exercise names can establish the domain by themselves. Generic body
+    parts require an explicit request/log cue. This prevents statements such as
+    'お尻ぬるぬるする' from being converted into workout consultations.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+
+    strong_domain = _contains_any(t, STRONG_TRAINING_TERMS)
+    request = _contains_any(t, TRAINING_REQUEST_CUES)
+    log_signal = _contains_any(t, TRAINING_LOG_CUES) or _has_log_pattern(t)
+    body_part = _contains_any(t, BODY_PART_TERMS)
+
+    if strong_domain:
         return True
-    if consult and any(bp in t for bp in ["胸","背中","脚","足","肩","腕","腹","尻","二頭","三頭"]):
-        return True
-    if any(re.search(p, t, re.I) for p in LOG_PATTERNS):
+    if body_part and (request or log_signal):
         return True
     return False
 
 
 def classify_training_intent(text: str, last_training_context: dict | None = None):
     t = text or ""
-    low = t.lower()
     stripped = t.strip()
     last_training_context = last_training_context or {}
 
     question_like = bool(re.search(r"[？?]|何回|なんかい|何レップ|何セット|どう|やれば|すれば|いいの|いい？|よい？", t))
     followup_normalized = re.sub(r"[？?！!。\s]+$", "", stripped)
-    followup_only = followup_normalized in {
-        "", "うん", "はい", "なるほど", "ふむ", "ほう", "で", "それで", "続き",
-    }
-    in_training_context = bool(last_training_context)
+    followup_only = followup_normalized in {"", "うん", "はい", "なるほど", "ふむ", "ほう", "で", "それで", "続き"}
+    in_training_context = bool(last_training_context.get("intent") or last_training_context.get("parts"))
 
     explicit_training_topic = contains_training_intent(t)
     fullbody_topic = any(k in t for k in ["全身", "全部位", "フルボディ", "全身法", "全身鍛える"])
     other_day_question = bool(re.search(r"他の日|別の日|翌日|次の日|週間|週メニュー|週のメニュー|分割", t))
 
-    # A previous workout topic alone must never turn an arbitrary question into
-    # a training question.  Context inheritance is limited to a tiny whitelist
-    # of genuinely context-dependent follow-ups (e.g. "それで？", "他の日は？").
-    # This prevents messages such as "ぽつお日本橋？" from entering training mode.
     context_followup = in_training_context and (followup_only or other_day_question)
     if not explicit_training_topic and not context_followup:
         return {
@@ -73,7 +99,7 @@ def classify_training_intent(text: str, last_training_context: dict | None = Non
             "is_log": False,
             "question_like": question_like,
             "inherited_training_context": False,
-            "reason": "no_current_training_signal",
+            "reason": "no_training_purpose_and_domain",
         }
 
     parts = []
@@ -81,18 +107,13 @@ def classify_training_intent(text: str, last_training_context: dict | None = Non
         if any(k in t for k in keys):
             parts.append(part)
 
-    # inherit body part only for true vague followups.
-    # Explicit new topics such as 全身 should not be swallowed by the old context.
     if not parts and last_training_context.get("parts") and not explicit_training_topic:
         parts = list(last_training_context.get("parts", []))
 
-    is_log = any(re.search(p, t, re.I) for p in LOG_PATTERNS)
+    is_log = _has_log_pattern(t)
 
-    # Safety/pain first.
     if any(k in t for k in ["痛い", "痛み", "筋肉痛", "違和感", "怪我", "ケガ", "腫れ", "しびれ", "痺れ"]):
         intent = "pain_or_injury"
-
-    # Questions must beat log detection.
     elif question_like:
         if other_day_question:
             intent = "weekly_plan_followup"
@@ -108,15 +129,10 @@ def classify_training_intent(text: str, last_training_context: dict | None = Non
             intent = "form_advice"
         else:
             intent = "training_followup_question"
-
-    # Short follow-up inside training context.
     elif in_training_context and followup_only:
         intent = "training_ack_or_followup"
-
-    # Then logs.
-    elif any(k in t for k in ["記録", "メモ", "やった", "完了", "終わった"]) or is_log:
+    elif _contains_any(t, TRAINING_LOG_CUES) or is_log:
         intent = "log_workout"
-
     elif fullbody_topic and any(k in t for k in ["メニュー", "組んで", "鍛える", "やる"]):
         intent = "fullbody_program_request"
     elif other_day_question:
@@ -139,4 +155,5 @@ def classify_training_intent(text: str, last_training_context: dict | None = Non
         "is_log": is_log and not question_like,
         "question_like": question_like,
         "inherited_training_context": context_followup and not explicit_training_topic,
+        "reason": "current_training_purpose_and_domain" if explicit_training_topic else "verified_training_followup",
     }

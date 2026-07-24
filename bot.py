@@ -65,6 +65,7 @@ class HashimotoArataBot:
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
         self.last_topic_terms = defaultdict(list)
+        self.seen_chats = set()
         self.shutdown_store = ShutdownStateStore()
         self.continuity_seconds = int(os.environ.get("CONTINUITY_SECONDS", "420"))
         self.continuity_min_history = int(os.environ.get("CONTINUITY_MIN_HISTORY", "1"))
@@ -72,7 +73,7 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.13",
+            "version=v14.15",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
@@ -102,29 +103,18 @@ class HashimotoArataBot:
         return False
 
     def should_wake_from_shutdown(self, text: str):
-        t = text or ""
-        nt = normalize(t)
+        """Wake on the first substantive message and process that same message.
 
-        if any(term in t for term in WAKE_TERMS):
-            return True, "wake_term"
-
-        if any(normalize(term) in nt for term in WAKE_TERMS):
-            return True, "wake_term_normalized"
-
-        # Practical training feature should be able to wake the bot.
-        if contains_training_intent(t):
-            return True, "training_intent"
-
-        # Safety-related training questions should also wake.
-        training_context = {}
-        try:
-            should, intent, safety = self.ai_training_advisor.should_use(t, context=training_context)
-            if should:
-                return True, "ai_training_should_use"
-        except Exception as e:
-            print("wake_training_check_error:", repr(e), flush=True)
-
-        return False, "no_wake_signal"
+        Shutdown means "do not continue the previous conversation"; it must not
+        consume or discard the next user's utterance. Explicit stop messages stay
+        silent and keep shutdown enabled.
+        """
+        t = (text or "").strip()
+        if not t:
+            return False, "empty_message"
+        if self.current_state.stopped(t):
+            return False, "explicit_stop"
+        return True, "first_substantive_message"
 
     def remember_user(self, chat_id: str, text: str):
         self.histories[chat_id].append(text)
@@ -314,7 +304,10 @@ class HashimotoArataBot:
         return system, user
 
     def reply(self, chat_id: str, user_text: str, sender_id: str | None = None, sender_display_name: str | None = None) -> str | None:
+        is_first_message = chat_id not in self.seen_chats
+        self.seen_chats.add(chat_id)
         context = self.context(chat_id, user_text)
+        print("conversation_entry:", {"is_first_message": is_first_message, "history_size": len(self.histories[chat_id])}, flush=True)
         speaker = self.speaker_resolver.resolve(sender_id=sender_id, display_name=sender_display_name)
         print("speaker_resolution:", {"canonical": speaker.canonical_name, "display": speaker.display_name, "address": speaker.address, "confidence": speaker.confidence, "source": speaker.source}, flush=True)
 
@@ -371,6 +364,7 @@ class HashimotoArataBot:
             history=list(self.histories[chat_id]),
             last_topic_terms=self.last_topic_terms[chat_id],
             search_result=result,
+            is_first_message=is_first_message,
         )
 
         called = state.get("called", False)
