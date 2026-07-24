@@ -5,8 +5,7 @@ TRAINING_KEYWORDS = [
     "筋トレ", "トレーニング", "ワークアウト", "メニュー", "セット", "レップ", "rep", "reps",
     "ベンチ", "スクワット", "デッド", "懸垂", "腕立て", "腹筋", "背筋", "ダンベル", "ケーブル",
     "ケーブルロウ", "ロウ", "ローイング", "ラットプル", "プレス", "カール", "フライ", "レイズ",
-    "胸", "背中", "脚", "足", "肩", "腕", "二頭", "三頭", "腹", "尻",
-    "増量", "減量", "カロリー", "タンパク", "たんぱく", "プロテイン",
+        "増量", "減量", "カロリー", "タンパク", "たんぱく", "プロテイン",
     "筋肉痛", "フォーム", "重量", "MAX", "マックス", "有酸素", "休養",
     "全身", "全部位", "フルボディ", "全身法", "全身鍛える",
     "ジム", "今日は胸", "今日胸", "今日脚", "今日肩", "今日背中", "今日腕",
@@ -32,8 +31,12 @@ BODY_PARTS = {
 
 
 def contains_training_intent(text: str) -> bool:
-    t = text or ""
-    if any(k.lower() in t.lower() for k in TRAINING_KEYWORDS):
+    t=text or ""
+    consult=bool(re.search(r"(教えて|どう|方法|フォーム|メニュー|何回|何セット|重量|kg|キロ|レップ|セット|おすすめ|すべき)",t))
+    exercise=any(k.lower() in t.lower() for k in TRAINING_KEYWORDS)
+    if exercise:
+        return True
+    if consult and any(bp in t for bp in ["胸","背中","脚","足","肩","腕","腹","尻","二頭","三頭"]):
         return True
     if any(re.search(p, t, re.I) for p in LOG_PATTERNS):
         return True
