@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from utils import normalize, angerish
+from japanese_analysis import analyze_content
 
 
 PERSONA_SPEAKERS = {"LIAR  OF  ARAKUN", "Unknown", "橋本新", "Arata Hashimoto"}
@@ -125,11 +126,15 @@ class DynamicSearch:
                 if self._good_term(tok):
                     terms.add(tok)
 
-        # Mixed chunks are dangerous. Keep only if they contain katakana/latin/critical.
-        for tok in re.findall(r"[A-Za-z0-9一-龥々〆ヵヶァ-ヴｦ-ﾟぁ-んー]{3,}", raw):
-            tok = tok.strip()
-            if self._good_mixed_term(tok):
+        # Shared lightweight Japanese analysis. This avoids splitting mixed
+        # Japanese words into meaningless hiragana tails and kanji fragments.
+        content = analyze_content(raw)
+        for tok in content.topics:
+            if self._good_term(tok):
                 terms.add(tok)
+        for pred in content.predicates:
+            if self._good_predicate(pred):
+                predicates.add(pred)
 
         predicates.update(self.extract_predicates(raw))
 

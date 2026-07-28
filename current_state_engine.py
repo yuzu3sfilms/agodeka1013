@@ -3,6 +3,7 @@ from collections import Counter
 
 from utils import normalize
 from query_intent import intent_profile
+from japanese_analysis import analyze_content
 
 
 CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA"]
@@ -17,19 +18,8 @@ EXPAND_CUES = ["なに", "何", "それ何", "どんな", "話", "エピソー�
 
 
 def extract_topic_terms(text: str):
-    toks = re.findall(
-        r"[ぁ-んー]{2,}|[ァ-ヴｦ-ﾟー]{2,}|[A-Za-z][A-Za-z0-9_\-]{2,}|[一-龥々〆ヵヶ]{2,}|[0-9０-９]+\s*(?:個|人|枚|回|本|杯|兆個|兆)",
-        text or "",
-    )
-    bad = {
-        "今日", "明日", "昨日", "これ", "それ", "あれ", "する", "した", "して", "いる", "ある", "ない",
-        "何個", "何回", "何人", "何枚", "できる", "食べる", "食べれる", "どう", "なんで", "ねえ", "ねぇ", "ちょっと", "おい", "あの", "うん", "はい", "なるほど", "ふむ",
-    }
-    out = []
-    for t in toks:
-        if t not in bad:
-            out.append(t)
-    return list(dict.fromkeys(out))
+    """Fallback only; primary terms should come from DynamicSearch."""
+    return list(analyze_content(text).topics)
 
 
 class CurrentStateEngine:
@@ -82,7 +72,9 @@ class CurrentStateEngine:
         reaction_like = bool(REACTION_RE.search(stripped))
         qprof = intent_profile(text)
         nostalgia_cue = qprof.get("wants_memory", False)
-        expand_cue = qprof.get("wants_expansion", False) or qprof.get("wants_explanation", False)
+        expand_cue = qprof.get("wants_expansion", False)
+        explanation_cue = qprof.get("wants_explanation", False)
+        hypothetical = qprof.get("is_hypothetical", False)
         exact_answer_cue = qprof.get("wants_exact_answer", False)
 
         # Current conversation mode
@@ -96,6 +88,10 @@ class CurrentStateEngine:
             intent = "reaction_ping"
         elif nostalgia_cue or expand_cue:
             intent = "episode_expand"
+        elif explanation_cue:
+            intent = "explanation_question"
+        elif hypothetical:
+            intent = "hypothetical_question"
         elif is_question:
             intent = "question"
         elif called:
@@ -139,6 +135,8 @@ class CurrentStateEngine:
             preferred_route = "fallback_only"
         elif nostalgia_cue or expand_cue:
             preferred_route = "episode_expand"
+        elif explanation_cue or hypothetical:
+            preferred_route = "scene_then_fallback"
         elif attention_only:
             preferred_route = "fallback_only"
         elif bare_topic or reaction_like or short:
@@ -160,6 +158,8 @@ class CurrentStateEngine:
             "attention_only": attention_only,
             "nostalgia_cue": nostalgia_cue,
             "expand_cue": expand_cue,
+            "explanation_cue": explanation_cue,
+            "hypothetical": hypothetical,
             "exact_answer_cue": exact_answer_cue,
             "query_intents": qprof.get("intents", []),
             "stopped": stopped,
