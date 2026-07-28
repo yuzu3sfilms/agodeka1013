@@ -9,6 +9,7 @@ from flask import Flask, request, abort
 
 from bot import HashimotoArataBot
 from utils import normalize
+from webhook_event_store import mark_handled, was_handled
 
 
 LINE_CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
@@ -136,12 +137,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v14.12.2 shared shutdown state is running."
+    return "AI Hashimoto Arata v14.17 webhook redelivery recovery is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v14.12.2-shared-shutdown-state", "time": int(time.time())}
+    return {"ok": True, "version": "v14.17-webhook-redelivery-recovery", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
@@ -165,6 +166,23 @@ def callback():
 
     for event in events:
         reply_token = event.get("replyToken")
+        event_id = event.get("webhookEventId", "")
+        redelivery = bool(event.get("deliveryContext", {}).get("isRedelivery", False))
+        event_timestamp = event.get("timestamp")
+        event_age_ms = None
+        if isinstance(event_timestamp, (int, float)):
+            event_age_ms = max(0, int(time.time() * 1000 - event_timestamp))
+
+        log("webhook_event:", {
+            "id": event_id,
+            "is_redelivery": redelivery,
+            "event_age_ms": event_age_ms,
+        })
+
+        if was_handled(event_id):
+            log("duplicate webhook skipped:", event_id)
+            continue
+
         try:
             log("event type:", event.get("type"))
             if event.get("type") != "message":
@@ -174,6 +192,7 @@ def callback():
             log("message type:", message.get("type"))
             if message.get("type") != "text":
                 log("ignored non-text")
+                mark_handled(event_id)
                 continue
 
             user_text = message.get("text", "")
@@ -188,19 +207,26 @@ def callback():
                 bot.remember_user(chat_id, user_text)
                 bot.set_shutdown(chat_id, True)
                 log("stopped: shutdown_state=True")
+                mark_handled(event_id)
                 continue
 
             answer = bot.reply(chat_id, user_text, sender_id=sender_id, sender_display_name=sender_display_name)
 
             if answer is None:
                 log("ignored: no episode")
+                mark_handled(event_id)
                 continue
 
             log("reply:", answer)
             if reply_token:
-                reply_line(reply_token, answer, fallback_to_id=chat_id)
+                delivered = reply_line(reply_token, answer, fallback_to_id=chat_id)
             else:
-                push_line(chat_id, answer)
+                delivered = push_line(chat_id, answer)
+
+            if delivered:
+                mark_handled(event_id)
+            else:
+                log("event left unhandled for redelivery:", event_id)
 
         except Exception as e:
             log("callback event error:", repr(e))
