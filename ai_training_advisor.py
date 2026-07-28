@@ -9,6 +9,39 @@ from training_safety import check_training_safety
 from training_tone_guard import guard_training_tone
 
 
+# Content validation is intentionally conservative. Persona weirdness belongs in
+# phrasing, never in exercise names, anatomy, load, or programming advice.
+KNOWN_TRAINING_KATAKANA = {
+    "トレーニング", "ワークアウト", "フォーム", "メニュー", "セット", "レップ",
+    "スクワット", "ベンチプレス", "デッドリフト", "ルーマニアンデッドリフト",
+    "ダンベル", "バーベル", "ケーブル", "マシン", "ベンチ", "プレス",
+    "ショルダープレス", "オーバーヘッドプレス", "インクライン", "デクライン",
+    "フライ", "チェストプレス", "プッシュアップ", "プッシュダウン",
+    "ローイング", "ロウ", "ロー", "シーテッドロー", "ワンハンドロー",
+    "ベントオーバーロー", "ラットプルダウン", "ラットプル", "プルアップ",
+    "チンニング", "フェイスプル", "サイドレイズ", "リアレイズ", "フロントレイズ",
+    "カール", "アームカール", "ハンマーカール", "コンセントレーションカール",
+    "ブルガリアンスクワット", "ランジ", "レッグプレス", "レッグカール",
+    "レッグエクステンション", "カーフレイズ", "ヒップスラスト", "ヒップヒンジ",
+    "グルートブリッジ", "クランチ", "プランク", "アブローラー",
+    "ウォームアップ", "クールダウン", "ストレッチ", "プロテイン",
+    "タンパク質", "カロリー", "ボリューム", "オーバーロード",
+    "ルーティン", "フルボディ", "スプリット", "スーパーセット",
+    "ドロップセット", "ネガティブ", "ポジティブ", "グリップ",
+    "ニュートラル", "ワイド", "ナロー", "スミスマシン", "パワーラック",
+    "セーフティ", "スポッター", "バー", "プレート", "ベルト", "ストラップ",
+    "リストラップ", "リストストラップ", "チューブ", "バンド", "ジョギング",
+    "ウォーキング", "ランニング", "サイクリング", "エアロバイク",
+    "ステロイド", "サーム", "サームズ", "ホルモン",
+}
+
+COMMON_NON_EXERCISE_KATAKANA = {
+    "ライン", "アドバイス", "ポイント", "ペース", "リスク", "タイプ",
+    "パターン", "バランス", "タイミング", "コンディション", "チェック",
+    "キープ", "コントロール", "テンポ", "スタート", "クリア", "オーケー",
+}
+
+
 @dataclass
 class AITrainingResult:
     used: bool
@@ -28,6 +61,10 @@ class AITrainingAdvisor:
     This route should NOT be past-log replay.
     It uses general training knowledge through the LLM, while preserving
     AIあらくん-ish behavior and strict safety boundaries.
+
+    v14.19 separates factual fitness content from persona styling. Generated
+    advice is validated before it can be returned; suspicious invented exercise
+    names cause a deterministic general-knowledge fallback.
     """
 
     def __init__(self, client=None, model: str | None = None, memory=None):
@@ -53,7 +90,9 @@ class AITrainingAdvisor:
 役割:
 - 筋トレ、ボディメイク、減量、増量、フォーム、メニュー、記録、疲労管理について実用的に相談に乗る。
 - 過去ログの発話だけに縛られず、一般的なトレーニング知識で答える。
-- ただしキャラの外皮はAIあらくん。少し変で、短めで、でもちゃんと役に立つ。
+- 内容は普通に正確であること。キャラ付けは語尾と短さだけに限定する。
+- 架空の種目名、造語、存在を確認できない器具名や理論名を絶対に作らない。
+- 種目名に迷ったら、スクワット、腕立て伏せ、ベンチプレス、ローイング、ラットプルダウンなど一般的な名称だけを使う。
 - 医療・栄養・運動の高リスク事項では安全側に倒す。
 
 口調:
@@ -64,7 +103,7 @@ class AITrainingAdvisor:
 - 「おすすめです」連発禁止。
 - 「痛みや不快感は感じているかな？」のような優しい質問口調は禁止。
 - 返答は少しぶっきらぼうで、実用的。
-- たまに「あはい」「ぼくぅなら」を使ってよい。
+- たまに「あはい」「ぼくぅなら」を使ってよい。ただし種目名や知識を変な言葉にしない。
 - 長い説教にしない。
 - 返答は基本 3〜7行程度。
 - 箇条書きは使ってよい。
@@ -109,8 +148,9 @@ training_intent:
 最近の筋トレ記録:
 {recent_logs or "なし"}
 
-この発言に、AIあらくんの振る舞いで筋トレ相談として答えて。
-必要なら暫定案を出してから、最後に確認質問を1つだけ。
+一般的なトレーニング知識に基づいて答えて。
+内容は事実優先。実在する標準的な種目名だけを使い、造語しない。
+AIあらくんらしさは短さ・語尾だけに使う。最後の質問は必要な場合だけ1つ。
 """
 
     def _fallback_answer(self, user_text: str, intent: dict, safety: dict):
@@ -188,10 +228,39 @@ training_intent:
             )
 
         return (
-            "あはい、筋トレ相談ですね。\n"
-            "目的・週何回できるか・使える器具でメニューは変わります。\n"
-            "暫定なら8〜12回を2〜4セット、フォーム優先で積んでいけばいいです。"
+            "初心者なら週2〜3回の全身法でいいです。\n"
+            "スクワット系、押す種目、引く種目を各2〜3セット。\n"
+            "まずは8〜12回、あと2回くらいできる余裕を残して、フォームが安定したら少しずつ重くしてください。\n"
+            "家トレかジムかで種目を決めます。"
         )
+
+    @staticmethod
+    def _katakana_terms(text: str) -> set[str]:
+        return set(re.findall(r"[ァ-ヴー]{3,}", text or ""))
+
+    def _validate_general_knowledge_answer(self, answer: str, user_text: str = "") -> tuple[bool, dict]:
+        """Reject likely invented terminology before it reaches LINE.
+
+        We do not try to prove every sentence scientifically here. The hard
+        failure mode being prevented is fabricated exercise/equipment names.
+        Unknown katakana introduced by the model is therefore treated as
+        suspicious. Terms already used by the user are allowed so their wording
+        can be discussed or corrected.
+        """
+        answer_terms = self._katakana_terms(answer)
+        user_terms = self._katakana_terms(user_text)
+        allowed = KNOWN_TRAINING_KATAKANA | COMMON_NON_EXERCISE_KATAKANA | user_terms
+        unknown = sorted(term for term in answer_terms if term not in allowed)
+
+        # Explicitly reject hedged invention patterns as well.
+        invention_patterns = [
+            r"(?:という|っていう)(?:種目|トレーニング|メニュー)",
+            r"オリジナル(?:種目|メニュー)",
+            r"架空", r"たぶん.*(?:種目|トレーニング)",
+        ]
+        pattern_hits = [p for p in invention_patterns if re.search(p, answer)]
+        valid = not unknown and not pattern_hits
+        return valid, {"unknown_katakana": unknown, "pattern_hits": pattern_hits}
 
     def answer(self, chat_id: str, user_text: str, context: dict | None = None):
         should, intent, safety = self.should_use(user_text, context=context)
@@ -240,13 +309,18 @@ training_intent:
             )
             answer = (res.choices[0].message.content or "").strip()
             answer = self._clean(answer)
-            if not answer:
+            valid, validation = self._validate_general_knowledge_answer(answer, user_text)
+            if not answer or not valid:
+                print("training_content_validation_fallback:", validation, flush=True)
                 answer = self._fallback_answer(user_text, intent, safety)
+                result_kind = f"ai_training_{intent.get('intent', 'general')}_validated_fallback"
+            else:
+                result_kind = f"ai_training_{intent.get('intent', 'general')}"
             answer, tone_info = guard_training_tone(answer, user_text)
 
             return AITrainingResult(
                 used=True,
-                kind=f"ai_training_{intent.get('intent', 'general')}",
+                kind=result_kind,
                 answer=answer,
                 intent=intent,
                 safety=safety,
