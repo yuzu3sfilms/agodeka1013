@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable
 
-MEDIA = {"[写真]", "[動画]", "[スタンプ]", ""}
+from behavior_taxonomy import MEDIA, classify_reply, classify_stimulus
 
 
 def _lines_before(scene: dict) -> list[tuple[str, str]]:
@@ -27,45 +27,6 @@ def _lines_before(scene: dict) -> list[tuple[str, str]]:
         out.append((speaker.strip(), text.strip()))
     return out
 
-
-def _reply_pattern(text: str) -> str:
-    r = (text or "").strip()
-    if not r:
-        return "empty"
-    if re.fullmatch(r"[wｗ笑]+", r, re.I) or any(x in r for x in ("笑", "草")):
-        return "laugh"
-    if re.search(r"ありがとう|あざ", r):
-        return "thanks"
-    if re.search(r"すみません|ごめん", r):
-        return "apology"
-    if re.search(r"やめ|無理|嫌|だめ|ダメ", r):
-        return "negative"
-    if re.search(r"[？?]", r):
-        return "question"
-    if len(r) <= 4:
-        return "reaction"
-    if len(r) <= 12:
-        return "short_statement"
-    if len(r) <= 30:
-        return "medium_statement"
-    return "long_statement"
-
-
-def _stimulus_type(before: list[tuple[str, str]]) -> str:
-    if not before:
-        return "no_context"
-    text = before[-1][1]
-    if text in MEDIA:
-        return "media"
-    if re.search(r"[？?]|何|なに|誰|だれ|どこ|いつ|なんで|なぜ|どう", text):
-        return "question"
-    if re.search(r"ごめん|すみません", text):
-        return "apology"
-    if re.search(r"ありがとう|あざ", text):
-        return "thanks"
-    if len(text) <= 5:
-        return "short_reaction"
-    return "statement"
 
 
 def _ratio_map(counter: Counter) -> dict:
@@ -98,8 +59,8 @@ def compile_persona(scene_path: Path) -> dict:
             if not reply or reply in MEDIA or len(reply) > 90:
                 continue
             before = _lines_before(scene)
-            pattern = _reply_pattern(reply)
-            stimulus = _stimulus_type(before)
+            pattern = classify_reply(reply)
+            stimulus = classify_stimulus(before[-1][1] if before else "")
             patterns[pattern] += 1
             transitions[stimulus][pattern] += 1
             lengths.append(len(reply))
@@ -141,8 +102,8 @@ def compile_persona(scene_path: Path) -> dict:
     }
 
     return {
-        "schema_version": 1,
-        "model": "hashimoto_persona_policy",
+        "schema_version": 2,
+        "model": "hashimoto_layered_persona_policy",
         "source": scene_path.name,
         "evidence": {"usable_scenes": reply_count},
         "language": {

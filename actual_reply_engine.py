@@ -9,6 +9,7 @@ import math
 from utils import normalize
 from query_intent import intent_profile
 from persona_policy import PersonaPolicy
+from behavior_taxonomy import classify_reply, classify_stimulus
 
 
 MEDIA_REPLIES = {
@@ -94,36 +95,7 @@ class ActualReplyEngine:
 
     @staticmethod
     def _reply_pattern(reply: str) -> str:
-        """Coarse response pattern used for frequency priors.
-
-        This intentionally groups behavior, not just identical strings. It is
-        conservative: rare proper-noun jokes remain available because frequency
-        is only a soft reranking feature after the evidence gate.
-        """
-        r = (reply or "").strip()
-        if not r:
-            return "empty"
-        if re.fullmatch(r"[wｗ笑]+", r, re.I) or any(x in r for x in ["笑", "草"]):
-            return "reaction_laugh"
-        if re.fullmatch(r"(?:え|えっ|は|ん|何|なに)[？?！!。…]*", r):
-            return "reaction_surprise"
-        if re.search(r"ありがとう|あざ", r):
-            return "thanks"
-        if re.search(r"すみません|ごめん", r):
-            return "apology"
-        if re.search(r"どこ|何時|いつ|誰|だれ|なんで|なぜ|どう", r) and re.search(r"[？?]", r):
-            return "question_specific"
-        if re.search(r"[？?]", r):
-            return "question_general"
-        if re.search(r"やめ|無理|嫌|だめ|ダメ", r):
-            return "negative_advice"
-        if len(r) <= 4:
-            return "very_short"
-        if len(r) <= 12:
-            return "short_statement"
-        if len(r) <= 30:
-            return "medium_statement"
-        return "long_statement"
+        return classify_reply(reply)
 
     def _build_persona_statistics(self):
         for scene in self.scenes:
@@ -181,7 +153,9 @@ class ActualReplyEngine:
         policy = getattr(self, "persona_policy", None)
         if policy is not None:
             policy_bonus, policy_reasons = policy.action_bonus(
-                pattern, current_speaker=current_speaker
+                pattern,
+                current_speaker=current_speaker,
+                situation=classify_stimulus((context or "").splitlines()[-1] if (context or "").splitlines() else ""),
             )
         else:
             policy_bonus, policy_reasons = 0, []

@@ -23,7 +23,7 @@ def test_compiler_emits_evidence_backed_policy(tmp_path):
     _write_scenes(scene_path)
     result = compile_persona(scene_path)
     assert result["evidence"]["usable_scenes"] == 4
-    assert result["global_action_policy"]["question"]["count"] == 2
+    assert result["global_action_policy"]["question_specific"]["count"] == 2
     assert "Reiji Shioda" in result["relationship_policy"]
     assert result["relationship_policy"]["Reiji Shioda"]["weighted_sample_count"] > 0
 

@@ -142,7 +142,7 @@ def index():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v14.22-persona-compiler", "time": int(time.time())}
+    return {"ok": True, "version": "v14.23-persona-compiler", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])
