@@ -1,0 +1,540 @@
+{
+  "schema_version": 1,
+  "model": "hashimoto_persona_policy",
+  "source": "conversation_scenes.jsonl.gz",
+  "evidence": {
+    "usable_scenes": 5075
+  },
+  "language": {
+    "average_reply_length": 14.85,
+    "short_reply_probability": 0.5561,
+    "long_reply_probability": 0.0962,
+    "surface_markers": {
+      "period": {
+        "count": 1648,
+        "probability": 0.3247
+      },
+      "question_mark": {
+        "count": 584,
+        "probability": 0.1151
+      },
+      "exclamation": {
+        "count": 208,
+        "probability": 0.041
+      },
+      "laughter": {
+        "count": 37,
+        "probability": 0.0073
+      }
+    }
+  },
+  "global_action_policy": {
+    "short_statement": {
+      "count": 1734,
+      "probability": 0.3417
+    },
+    "medium_statement": {
+      "count": 1470,
+      "probability": 0.2897
+    },
+    "question": {
+      "count": 601,
+      "probability": 0.1184
+    },
+    "reaction": {
+      "count": 514,
+      "probability": 0.1013
+    },
+    "long_statement": {
+      "count": 441,
+      "probability": 0.0869
+    },
+    "apology": {
+      "count": 140,
+      "probability": 0.0276
+    },
+    "negative": {
+      "count": 88,
+      "probability": 0.0173
+    },
+    "thanks": {
+      "count": 50,
+      "probability": 0.0099
+    },
+    "laugh": {
+      "count": 37,
+      "probability": 0.0073
+    }
+  },
+  "situation_policy": {
+    "apology": {
+      "sample_count": 16,
+      "actions": {
+        "short_statement": {
+          "count": 8,
+          "probability": 0.5
+        },
+        "medium_statement": {
+          "count": 4,
+          "probability": 0.25
+        },
+        "apology": {
+          "count": 2,
+          "probability": 0.125
+        },
+        "long_statement": {
+          "count": 1,
+          "probability": 0.0625
+        },
+        "reaction": {
+          "count": 1,
+          "probability": 0.0625
+        }
+      }
+    },
+    "media": {
+      "sample_count": 327,
+      "actions": {
+        "short_statement": {
+          "count": 146,
+          "probability": 0.4465
+        },
+        "medium_statement": {
+          "count": 95,
+          "probability": 0.2905
+        },
+        "question": {
+          "count": 31,
+          "probability": 0.0948
+        },
+        "reaction": {
+          "count": 25,
+          "probability": 0.0765
+        },
+        "long_statement": {
+          "count": 17,
+          "probability": 0.052
+        },
+        "laugh": {
+          "count": 4,
+          "probability": 0.0122
+        },
+        "thanks": {
+          "count": 4,
+          "probability": 0.0122
+        },
+        "negative": {
+          "count": 3,
+          "probability": 0.0092
+        },
+        "apology": {
+          "count": 2,
+          "probability": 0.0061
+        }
+      }
+    },
+    "question": {
+      "sample_count": 935,
+      "actions": {
+        "short_statement": {
+          "count": 344,
+          "probability": 0.3679
+        },
+        "medium_statement": {
+          "count": 243,
+          "probability": 0.2599
+        },
+        "question": {
+          "count": 118,
+          "probability": 0.1262
+        },
+        "reaction": {
+          "count": 94,
+          "probability": 0.1005
+        },
+        "long_statement": {
+          "count": 77,
+          "probability": 0.0824
+        },
+        "apology": {
+          "count": 32,
+          "probability": 0.0342
+        },
+        "negative": {
+          "count": 17,
+          "probability": 0.0182
+        },
+        "thanks": {
+          "count": 6,
+          "probability": 0.0064
+        },
+        "laugh": {
+          "count": 4,
+          "probability": 0.0043
+        }
+      }
+    },
+    "short_reaction": {
+      "sample_count": 1261,
+      "actions": {
+        "short_statement": {
+          "count": 433,
+          "probability": 0.3434
+        },
+        "medium_statement": {
+          "count": 297,
+          "probability": 0.2355
+        },
+        "reaction": {
+          "count": 204,
+          "probability": 0.1618
+        },
+        "question": {
+          "count": 157,
+          "probability": 0.1245
+        },
+        "long_statement": {
+          "count": 77,
+          "probability": 0.0611
+        },
+        "apology": {
+          "count": 48,
+          "probability": 0.0381
+        },
+        "negative": {
+          "count": 23,
+          "probability": 0.0182
+        },
+        "thanks": {
+          "count": 14,
+          "probability": 0.0111
+        },
+        "laugh": {
+          "count": 8,
+          "probability": 0.0063
+        }
+      }
+    },
+    "statement": {
+      "sample_count": 2531,
+      "actions": {
+        "medium_statement": {
+          "count": 829,
+          "probability": 0.3275
+        },
+        "short_statement": {
+          "count": 802,
+          "probability": 0.3169
+        },
+        "question": {
+          "count": 295,
+          "probability": 0.1166
+        },
+        "long_statement": {
+          "count": 269,
+          "probability": 0.1063
+        },
+        "reaction": {
+          "count": 189,
+          "probability": 0.0747
+        },
+        "apology": {
+          "count": 56,
+          "probability": 0.0221
+        },
+        "negative": {
+          "count": 45,
+          "probability": 0.0178
+        },
+        "thanks": {
+          "count": 25,
+          "probability": 0.0099
+        },
+        "laugh": {
+          "count": 21,
+          "probability": 0.0083
+        }
+      }
+    },
+    "thanks": {
+      "sample_count": 5,
+      "actions": {
+        "medium_statement": {
+          "count": 2,
+          "probability": 0.4
+        },
+        "short_statement": {
+          "count": 1,
+          "probability": 0.2
+        },
+        "thanks": {
+          "count": 1,
+          "probability": 0.2
+        },
+        "reaction": {
+          "count": 1,
+          "probability": 0.2
+        }
+      }
+    }
+  },
+  "relationship_policy": {
+    "Reiji Shioda": {
+      "weighted_sample_count": 6125,
+      "average_reply_length": 14.825,
+      "action_policy": {
+        "short_statement": {
+          "count": 2098,
+          "probability": 0.3425
+        },
+        "medium_statement": {
+          "count": 1747,
+          "probability": 0.2852
+        },
+        "question": {
+          "count": 753,
+          "probability": 0.1229
+        },
+        "reaction": {
+          "count": 633,
+          "probability": 0.1033
+        },
+        "long_statement": {
+          "count": 523,
+          "probability": 0.0854
+        },
+        "apology": {
+          "count": 156,
+          "probability": 0.0255
+        },
+        "negative": {
+          "count": 113,
+          "probability": 0.0184
+        },
+        "thanks": {
+          "count": 57,
+          "probability": 0.0093
+        },
+        "laugh": {
+          "count": 45,
+          "probability": 0.0073
+        }
+      }
+    },
+    "村田": {
+      "weighted_sample_count": 3914,
+      "average_reply_length": 13.688,
+      "action_policy": {
+        "short_statement": {
+          "count": 1380,
+          "probability": 0.3526
+        },
+        "medium_statement": {
+          "count": 1027,
+          "probability": 0.2624
+        },
+        "question": {
+          "count": 552,
+          "probability": 0.141
+        },
+        "reaction": {
+          "count": 399,
+          "probability": 0.1019
+        },
+        "long_statement": {
+          "count": 286,
+          "probability": 0.0731
+        },
+        "apology": {
+          "count": 133,
+          "probability": 0.034
+        },
+        "negative": {
+          "count": 67,
+          "probability": 0.0171
+        },
+        "thanks": {
+          "count": 39,
+          "probability": 0.01
+        },
+        "laugh": {
+          "count": 31,
+          "probability": 0.0079
+        }
+      }
+    },
+    "坂口": {
+      "weighted_sample_count": 2795,
+      "average_reply_length": 14.195,
+      "action_policy": {
+        "short_statement": {
+          "count": 989,
+          "probability": 0.3538
+        },
+        "medium_statement": {
+          "count": 838,
+          "probability": 0.2998
+        },
+        "question": {
+          "count": 304,
+          "probability": 0.1088
+        },
+        "reaction": {
+          "count": 266,
+          "probability": 0.0952
+        },
+        "long_statement": {
+          "count": 191,
+          "probability": 0.0683
+        },
+        "apology": {
+          "count": 116,
+          "probability": 0.0415
+        },
+        "negative": {
+          "count": 41,
+          "probability": 0.0147
+        },
+        "thanks": {
+          "count": 33,
+          "probability": 0.0118
+        },
+        "laugh": {
+          "count": 17,
+          "probability": 0.0061
+        }
+      }
+    },
+    "Ryo Sekiguchi": {
+      "weighted_sample_count": 689,
+      "average_reply_length": 19.851,
+      "action_policy": {
+        "medium_statement": {
+          "count": 240,
+          "probability": 0.3483
+        },
+        "short_statement": {
+          "count": 213,
+          "probability": 0.3091
+        },
+        "long_statement": {
+          "count": 116,
+          "probability": 0.1684
+        },
+        "question": {
+          "count": 47,
+          "probability": 0.0682
+        },
+        "reaction": {
+          "count": 37,
+          "probability": 0.0537
+        },
+        "negative": {
+          "count": 20,
+          "probability": 0.029
+        },
+        "thanks": {
+          "count": 9,
+          "probability": 0.0131
+        },
+        "laugh": {
+          "count": 7,
+          "probability": 0.0102
+        }
+      }
+    },
+    "中山 貴文": {
+      "weighted_sample_count": 210,
+      "average_reply_length": 13.852,
+      "action_policy": {
+        "short_statement": {
+          "count": 86,
+          "probability": 0.4095
+        },
+        "medium_statement": {
+          "count": 48,
+          "probability": 0.2286
+        },
+        "question": {
+          "count": 37,
+          "probability": 0.1762
+        },
+        "reaction": {
+          "count": 15,
+          "probability": 0.0714
+        },
+        "long_statement": {
+          "count": 13,
+          "probability": 0.0619
+        },
+        "thanks": {
+          "count": 9,
+          "probability": 0.0429
+        },
+        "negative": {
+          "count": 2,
+          "probability": 0.0095
+        }
+      }
+    },
+    "りんな": {
+      "weighted_sample_count": 47,
+      "average_reply_length": 6.255,
+      "action_policy": {
+        "reaction": {
+          "count": 26,
+          "probability": 0.5532
+        },
+        "short_statement": {
+          "count": 15,
+          "probability": 0.3191
+        },
+        "medium_statement": {
+          "count": 6,
+          "probability": 0.1277
+        }
+      }
+    },
+    "ひらかわさん": {
+      "weighted_sample_count": 30,
+      "average_reply_length": 10.433,
+      "action_policy": {
+        "short_statement": {
+          "count": 14,
+          "probability": 0.4667
+        },
+        "reaction": {
+          "count": 8,
+          "probability": 0.2667
+        },
+        "medium_statement": {
+          "count": 6,
+          "probability": 0.2
+        },
+        "question": {
+          "count": 2,
+          "probability": 0.0667
+        }
+      }
+    },
+    "サブ垢です": {
+      "weighted_sample_count": 9,
+      "average_reply_length": 6.333,
+      "action_policy": {
+        "short_statement": {
+          "count": 6,
+          "probability": 0.6667
+        },
+        "reaction": {
+          "count": 3,
+          "probability": 0.3333
+        }
+      }
+    }
+  },
+  "runtime": {
+    "confidence_floor": 12,
+    "max_policy_bonus": 14,
+    "note": "Policy is a soft prior. Corpus evidence and current context remain mandatory."
+  }
+}

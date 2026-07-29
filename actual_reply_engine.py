@@ -8,6 +8,7 @@ import math
 
 from utils import normalize
 from query_intent import intent_profile
+from persona_policy import PersonaPolicy
 
 
 MEDIA_REPLIES = {
@@ -73,6 +74,7 @@ class ActualReplyEngine:
         self.reply_frequency = Counter()
         self.pattern_frequency = Counter()
         self.speaker_frequency = Counter()
+        self.persona_policy = PersonaPolicy(data_dir)
         self._load()
         self._build_persona_statistics()
 
@@ -174,10 +176,17 @@ class ActualReplyEngine:
             bonus += b
             reasons.append(f"conversation_continuity:{','.join(overlap[:4])}:+{b}")
 
-        # All current scenes come from the same imported LINE group corpus.
-        # Keep a small explicit corpus-group prior, not a fake per-group score.
-        bonus += 3
-        reasons.append("same_corpus_group:+3")
+        # Corpus-derived policy is a soft prior only. Eligibility still comes
+        # from the current-turn evidence gate above this reranker.
+        policy = getattr(self, "persona_policy", None)
+        if policy is not None:
+            policy_bonus, policy_reasons = policy.action_bonus(
+                pattern, current_speaker=current_speaker
+            )
+        else:
+            policy_bonus, policy_reasons = 0, []
+        bonus += policy_bonus
+        reasons.extend(policy_reasons)
         return bonus, reasons
 
     def _is_bad_replay(self, reply: str):

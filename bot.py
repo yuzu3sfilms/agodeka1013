@@ -75,7 +75,7 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.21",
+            "version=v14.22",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
