@@ -13,6 +13,7 @@ from canon_answer import CanonAnswer
 from persona_judge import PersonaJudge
 from actual_reply_engine import ActualReplyEngine
 from current_state_engine import CurrentStateEngine
+from dialogue_manager import DialogueManager
 from reply_policy import ReplyPolicy
 from training_advisor import TrainingAdvisor
 from ai_training_advisor import AITrainingAdvisor
@@ -62,6 +63,7 @@ class HashimotoArataBot:
         self.ai_training_advisor = AITrainingAdvisor(client=self.client, model=self.model, memory=self.training_advisor.memory)
         self.speaker_resolver = SpeakerResolver()
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
+        self.dialogue = DialogueManager(max_turns=max(8, self.history_len * 2 + 2))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
         self.last_topic_terms = defaultdict(list)
@@ -73,7 +75,7 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.19",
+            "version=v14.21",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
@@ -118,14 +120,51 @@ class HashimotoArataBot:
 
     def remember_user(self, chat_id: str, text: str):
         self.histories[chat_id].append(text)
+        self.dialogue.add(chat_id, "user", text)
 
     def remember_bot(self, chat_id: str, text: str):
         if text:
             self.last_bot_replies[chat_id].append(text)
+            self.dialogue.add(chat_id, "assistant", text)
             self.last_reply_at[chat_id] = time.time()
 
     def context(self, chat_id: str, user_text: str) -> str:
-        return "\n".join(list(self.histories[chat_id]) + [user_text])
+        return self.dialogue.context(chat_id, current_user_text=user_text, limit=8)
+
+    def finish(self, chat_id: str, user_text: str, answer: str | None) -> str | None:
+        """All routes update the same role-labelled conversation history."""
+        self.remember_user(chat_id, user_text)
+        if answer:
+            self.remember_bot(chat_id, answer)
+        return answer
+
+    def continuity_prompt(self, user_text: str, chat_id: str, relation: dict, speaker: SpeakerProfile):
+        history = self.dialogue.context(chat_id, current_user_text=user_text, limit=8)
+        system = (
+            "橋本新本人風のAIアカウントとして、直前の会話につながる返答をする。"
+            "現在の発言を単独の検索語として扱わず、直前のassistant発言とuser発言を最優先する。"
+            "『え？』『何それ？』『どういうこと？』は直前回答への訂正・説明要求として処理する。"
+            "自分の直前回答に誤字、造語、矛盾、存在しない用語があれば、ごまかさず短く訂正する。"
+            "知らない言葉をもっともらしく定義しない。カメラ用語などと推測で断定しない。"
+            "話題を勝手に古いトピックへ戻さない。質問には先に答える。"
+            "口調は短く雑に。内容の正確さを壊してまでキャラ付けしない。"
+            "1〜3文。候補を4つ出す。"
+        )
+        user = f"""会話関係:{relation.get('relation')}
+判定理由:{relation.get('reason')}
+
+会話:
+{history}
+
+相手情報:
+{speaker.prompt_block()}
+
+直前の流れに自然につながる返答候補を4つ。
+候補1: ...
+候補2: ...
+候補3: ...
+候補4: ..."""
+        return system, user
 
     def should_inherit_topic(self, chat_id: str, user_text: str, raw_result: dict) -> bool:
         stripped = (user_text or "").strip()
@@ -310,6 +349,8 @@ class HashimotoArataBot:
         print("conversation_entry:", {"is_first_message": is_first_message, "history_size": len(self.histories[chat_id])}, flush=True)
         speaker = self.speaker_resolver.resolve(sender_id=sender_id, display_name=sender_display_name)
         print("speaker_resolution:", {"canonical": speaker.canonical_name, "display": speaker.display_name, "address": speaker.address, "confidence": speaker.confidence, "source": speaker.source}, flush=True)
+        dialogue_relation = self.dialogue.classify(chat_id, user_text)
+        print("dialogue_relation:", dialogue_relation, flush=True)
 
         # v14.11: shutdown wake check.
         # Do not discard the first wake message. If it wakes the bot,
@@ -318,9 +359,8 @@ class HashimotoArataBot:
             wake, reason = self.should_wake_from_shutdown(user_text)
             print("shutdown_state:", True, "wake_check:", wake, f"reason={reason}", flush=True)
             if not wake:
-                self.remember_user(chat_id, user_text)
                 print("generation path: shutdown_silence", flush=True)
-                return None
+                return self.finish(chat_id, user_text, None)
 
             self.set_shutdown(chat_id, False)
             print("shutdown_state:", False, "wake_consumed_first_message:", False, flush=True)
@@ -328,9 +368,7 @@ class HashimotoArataBot:
             if self.is_wake_only(user_text):
                 answer = "あはい"
                 print("generation path: wake_v14_11_short_ack", flush=True)
-                self.remember_user(chat_id, user_text)
-                self.remember_bot(chat_id, answer)
-                return answer
+                return self.finish(chat_id, user_text, answer)
 
         # v14.9: AI training consultation route first.
         # Training advice is no longer past-log replay or hardcoded menu only.
@@ -338,6 +376,8 @@ class HashimotoArataBot:
         training_context = self.training_advisor._context(chat_id)
         training_context = dict(training_context or {})
         training_context["speaker_instruction"] = speaker.prompt_block()
+        training_context["dialogue_relation"] = dialogue_relation
+        training_context["recent_dialogue"] = self.dialogue.context(chat_id, limit=6)
         training = self.ai_training_advisor.answer(chat_id, user_text, context=training_context)
         print("ai_training_advisor:", {k: v for k, v in training.items() if k != "answer"}, flush=True)
         if training.get("used"):
@@ -348,9 +388,43 @@ class HashimotoArataBot:
                 self.training_advisor.memory.add(chat_id, user_text)
             self.training_advisor._remember_context(chat_id, intent, answer)
             print(f"generation path: training_v14_11_{training.get('kind', 'advisor')}", flush=True)
-            self.remember_user(chat_id, user_text)
-            self.remember_bot(chat_id, answer)
-            return answer
+            return self.finish(chat_id, user_text, answer)
+
+        # v14.20: unresolved reactions and elliptical follow-ups are responses to
+        # the previous exchange, not fresh episode-search queries.
+        if dialogue_relation.get("relation") in {"repair_request", "followup", "continuation_request"}:
+            if self.groq_available():
+                try:
+                    system, user = self.continuity_prompt(user_text, chat_id, dialogue_relation, speaker)
+                    res = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                        temperature=min(self.temperature, 0.65),
+                        max_tokens=self.max_tokens,
+                    )
+                    raw = de_ai_tone(res.choices[0].message.content or "")
+                    print("continuity_groq_raw:", raw, flush=True)
+                    candidates = self.persona_judge.split_candidates(raw)
+                    cleaned = []
+                    for cand in candidates:
+                        cand = self.remove_unverified_vocative(clean_reply(user_text, cand), speaker)
+                        guarded, _ = guard_reply(cand, user_text)
+                        if guarded:
+                            cleaned.append(guarded)
+                    chosen, judge_info = self.persona_judge.choose(cleaned, user_text, {"episodes": [], "topic_terms": []})
+                    print("continuity_persona_judge:", judge_info, flush=True)
+                    if chosen:
+                        print("generation path: dialogue_v14_20_contextual_continuity", flush=True)
+                        return self.finish(chat_id, user_text, chosen)
+                except Exception as e:
+                    print("continuity_groq_error:", repr(e), flush=True)
+            # Deterministic repair fallback is preferable to inventing an old topic.
+            if dialogue_relation.get("relation") == "repair_request":
+                answer = "今の返し変でした。言い直します"
+            else:
+                answer = "その話の続きでいいです"
+            print("generation path: dialogue_v14_20_safe_fallback", flush=True)
+            return self.finish(chat_id, user_text, answer)
 
         # v14.13 evidence-first routing:
         # Never mutate the live utterance by appending a previous topic.
@@ -400,15 +474,13 @@ class HashimotoArataBot:
         print("reply_policy:", policy, flush=True)
 
         if not policy.get("reply"):
-            self.remember_user(chat_id, user_text)
             print("generation path: policy_silence", flush=True)
-            return None
+            return self.finish(chat_id, user_text, None)
 
         if no_relevant_episode and not self.should_continue_reply(chat_id, user_text, called, question):
             if "fallback" not in policy.get("routes", []):
-                self.remember_user(chat_id, user_text)
                 print("generation path: no_relevant_episode_ignore", flush=True)
-                return None
+                return self.finish(chat_id, user_text, None)
 
         if not no_relevant_episode and "canon" in policy.get("routes", []):
             canon, canon_info = self.canon_answer.answer(user_text, result)
@@ -419,9 +491,7 @@ class HashimotoArataBot:
                     print("style_guard:", guard_info, flush=True)
                 answer = guarded
                 print("generation path: canon_v14_11_policy_answer", flush=True)
-                self.remember_user(chat_id, user_text)
-                self.remember_bot(chat_id, answer)
-                return answer
+                return self.finish(chat_id, user_text, answer)
             else:
                 print("canon_answer_skip:", canon_info, flush=True)
         elif "canon" not in policy.get("routes", []):
@@ -438,6 +508,7 @@ class HashimotoArataBot:
                     topic_terms=result.get("topic_terms", []),
                     context_topic_terms=(state.get("topic_terms", []) if state.get("inherited_topic") else []),
                     intent=state.get("intent", ""),
+                    current_speaker=speaker.canonical_name,
                 )
                 print("replay_engine:", replay_info, flush=True)
                 if replay:
@@ -446,25 +517,20 @@ class HashimotoArataBot:
                         print("style_guard:", guard_info, flush=True)
                     answer = guarded
                     print("generation path: replay_v14_11_intent_ranked_scene_reply", flush=True)
-                    self.remember_user(chat_id, user_text)
-                    self.remember_bot(chat_id, answer)
-                    return answer
+                    return self.finish(chat_id, user_text, answer)
             else:
                 print("replay_engine_skip: no_relevant_episode", flush=True)
         else:
             print("replay_engine_skip: policy_skipped_scene_replay", flush=True)
 
         if "fallback" not in policy.get("routes", []):
-            self.remember_user(chat_id, user_text)
             print("generation path: policy_no_fallback_silence", flush=True)
-            return None
+            return self.finish(chat_id, user_text, None)
 
         if not self.groq_available():
             print("generation path: groq_cooldown_capyi", flush=True)
             answer = ERROR_FALLBACK
-            self.remember_user(chat_id, user_text)
-            self.remember_bot(chat_id, answer)
-            return answer
+            return self.finish(chat_id, user_text, answer)
 
         try:
             if no_relevant_episode:
@@ -520,6 +586,4 @@ class HashimotoArataBot:
                 print("generation path: groq_exception_capyi", flush=True)
             answer = ERROR_FALLBACK
 
-        self.remember_user(chat_id, user_text)
-        self.remember_bot(chat_id, answer)
-        return answer
+        return self.finish(chat_id, user_text, answer)

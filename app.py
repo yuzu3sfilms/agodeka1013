@@ -142,7 +142,7 @@ def index():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v14.19-training-general-knowledge", "time": int(time.time())}
+    return {"ok": True, "version": "v14.21-persona-reranker", "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])

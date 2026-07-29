@@ -3,6 +3,8 @@ import json
 import os
 import re
 from pathlib import Path
+from collections import Counter
+import math
 
 from utils import normalize
 from query_intent import intent_profile
@@ -68,7 +70,11 @@ class ActualReplyEngine:
         self.max_items = int(os.environ.get("REPLAY_MAX_SCENES", "5546"))
         self.min_score = int(os.environ.get("REPLAY_MIN_SCORE", "120"))
         self.scenes = []
+        self.reply_frequency = Counter()
+        self.pattern_frequency = Counter()
+        self.speaker_frequency = Counter()
         self._load()
+        self._build_persona_statistics()
 
     def _load(self):
         if not self.scene_path.exists():
@@ -82,6 +88,97 @@ class ActualReplyEngine:
                     self.scenes.append(item)
                 except Exception:
                     continue
+
+
+    @staticmethod
+    def _reply_pattern(reply: str) -> str:
+        """Coarse response pattern used for frequency priors.
+
+        This intentionally groups behavior, not just identical strings. It is
+        conservative: rare proper-noun jokes remain available because frequency
+        is only a soft reranking feature after the evidence gate.
+        """
+        r = (reply or "").strip()
+        if not r:
+            return "empty"
+        if re.fullmatch(r"[wｗ笑]+", r, re.I) or any(x in r for x in ["笑", "草"]):
+            return "reaction_laugh"
+        if re.fullmatch(r"(?:え|えっ|は|ん|何|なに)[？?！!。…]*", r):
+            return "reaction_surprise"
+        if re.search(r"ありがとう|あざ", r):
+            return "thanks"
+        if re.search(r"すみません|ごめん", r):
+            return "apology"
+        if re.search(r"どこ|何時|いつ|誰|だれ|なんで|なぜ|どう", r) and re.search(r"[？?]", r):
+            return "question_specific"
+        if re.search(r"[？?]", r):
+            return "question_general"
+        if re.search(r"やめ|無理|嫌|だめ|ダメ", r):
+            return "negative_advice"
+        if len(r) <= 4:
+            return "very_short"
+        if len(r) <= 12:
+            return "short_statement"
+        if len(r) <= 30:
+            return "medium_statement"
+        return "long_statement"
+
+    def _build_persona_statistics(self):
+        for scene in self.scenes:
+            reply = (scene.get("reply") or "").strip()
+            if not reply or self._is_bad_replay(reply):
+                continue
+            self.reply_frequency[normalize(reply)] += 1
+            self.pattern_frequency[self._reply_pattern(reply)] += 1
+            for sp in set(scene.get("speakers", []) or scene.get("prev_speakers", []) or []):
+                if sp:
+                    self.speaker_frequency[sp] += 1
+
+    @staticmethod
+    def _context_tokens(context: str):
+        recent = "\n".join((context or "").splitlines()[-6:])
+        return {normalize(t) for t in extract_tokens(recent) if normalize(t)}
+
+    def _persona_prior(self, scene: dict, reply: str, context: str, current_speaker: str | None):
+        """Soft priors applied only after exact-current-anchor eligibility.
+
+        We cap every component so common acknowledgements cannot overpower a
+        concrete rare episode.
+        """
+        bonus = 0
+        reasons = []
+
+        exact_freq = self.reply_frequency.get(normalize(reply), 0)
+        if exact_freq > 1:
+            b = min(10, round(math.log2(exact_freq + 1) * 2))
+            bonus += b
+            reasons.append(f"exact_reply_frequency:{exact_freq}:+{b}")
+
+        pattern = self._reply_pattern(reply)
+        pattern_freq = self.pattern_frequency.get(pattern, 0)
+        if pattern_freq > 1:
+            b = min(12, round(math.log2(pattern_freq + 1)))
+            bonus += b
+            reasons.append(f"pattern_frequency:{pattern}:{pattern_freq}:+{b}")
+
+        scene_speakers = set(scene.get("speakers", []) or scene.get("prev_speakers", []) or [])
+        if current_speaker and current_speaker in scene_speakers:
+            bonus += 15
+            reasons.append(f"same_partner:{current_speaker}:+15")
+
+        context_tokens = self._context_tokens(context)
+        anchors = self._exact_anchor_set(scene)
+        overlap = sorted(context_tokens & anchors)
+        if overlap:
+            b = min(18, len(overlap) * 10)
+            bonus += b
+            reasons.append(f"conversation_continuity:{','.join(overlap[:4])}:+{b}")
+
+        # All current scenes come from the same imported LINE group corpus.
+        # Keep a small explicit corpus-group prior, not a fake per-group score.
+        bonus += 3
+        reasons.append("same_corpus_group:+3")
+        return bonus, reasons
 
     def _is_bad_replay(self, reply: str):
         r = (reply or "").strip()
@@ -128,7 +225,7 @@ class ActualReplyEngine:
                 return w
         return None
 
-    def score_scene(self, scene: dict, user_text: str, context: str, topic_terms=None, context_topic_terms=None, intent: str = ""):
+    def score_scene(self, scene: dict, user_text: str, context: str, topic_terms=None, context_topic_terms=None, intent: str = "", current_speaker: str | None = None):
         reply = scene.get("reply", "")
         if self._is_bad_replay(reply):
             return None
@@ -265,6 +362,12 @@ class ActualReplyEngine:
                 score += 28
                 reasons.append("intent_exact_answer_like")
 
+        prior_bonus, prior_reasons = self._persona_prior(
+            scene=scene, reply=reply, context=context, current_speaker=current_speaker
+        )
+        score += prior_bonus
+        reasons.extend(prior_reasons)
+
         if score < self.min_score:
             return None
 
@@ -278,10 +381,10 @@ class ActualReplyEngine:
             "source_after": "\n".join(scene.get("after", [])[:4]),
         }
 
-    def search(self, user_text: str, context: str = "", topic_terms=None, context_topic_terms=None, intent: str = "", limit: int = 6):
+    def search(self, user_text: str, context: str = "", topic_terms=None, context_topic_terms=None, intent: str = "", limit: int = 12, current_speaker: str | None = None):
         results = []
         for scene in self.scenes:
-            s = self.score_scene(scene, user_text, context, topic_terms=topic_terms, context_topic_terms=context_topic_terms, intent=intent)
+            s = self.score_scene(scene, user_text, context, topic_terms=topic_terms, context_topic_terms=context_topic_terms, intent=intent, current_speaker=current_speaker)
             if s:
                 results.append(s)
         results.sort(key=lambda x: x["score"], reverse=True)
@@ -298,16 +401,17 @@ class ActualReplyEngine:
                 break
         return out
 
-    def choose(self, user_text: str, context: str = "", topic_terms=None, context_topic_terms=None, intent: str = ""):
+    def choose(self, user_text: str, context: str = "", topic_terms=None, context_topic_terms=None, intent: str = "", current_speaker: str | None = None):
         hits = self.search(
             user_text,
             context,
             topic_terms=topic_terms,
             context_topic_terms=context_topic_terms,
             intent=intent,
-            limit=6,
+            limit=12,
+            current_speaker=current_speaker,
         )
         if not hits:
             return None, {"used": False, "reason": "no_scene_replay_hit", "hits": []}
         best = hits[0]
-        return best["reply"], {"used": True, "mode": "scene_replay", "chosen": best, "hits": hits}
+        return best["reply"], {"used": True, "mode": "scene_replay_v14_21_persona_reranked", "chosen": best, "hits": hits}
