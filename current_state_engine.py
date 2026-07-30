@@ -1,20 +1,17 @@
 import re
-from collections import Counter
 
 from utils import normalize
 from query_intent import intent_profile
 from japanese_analysis import analyze_content
+from conversation_context import get_context, resolve_query
 
 
 CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA"]
 STOP_TERMS = ["もういい", "黙って", "だまって", "やめて", "やめろ", "終わり", "終了", "関係ない", "別の話", "停止"]
-ATTENTION_ONLY_TERMS = {"ねえ", "ねぇ", "ちょっと", "おい", "あの", "うん", "はい", "なるほど", "ふむ", "なあ", "なぁ", "うん", "はい", "なるほど", "ふむ"}
-
+ATTENTION_ONLY_TERMS = {"ねえ", "ねぇ", "ちょっと", "おい", "あの", "うん", "はい", "なるほど", "ふむ", "なあ", "なぁ"}
 QUESTION_RE = re.compile(r"[？?]|何|なに|誰|だれ|どこ|いつ|なんで|なぜ|どう|何個|何人|何枚|何回|いくつ")
 COUNT_RE = re.compile(r"何個|何人|何枚|何回|いくつ|何本|何杯")
 REACTION_RE = re.compile(r"^(笑|草|w+|www+|え|え？|は？|まじ|マジ|やば|きも|きゃぴ|ｷｬﾋﾟ|ぽつ|ぽつお|うんち|ペヤング)$", re.I)
-NOSTALGIA_CUES = ["なつかしい", "懐かしい"]
-EXPAND_CUES = ["なに", "何", "それ何", "どんな", "話", "エピソード", "説明", "由来", "なんだっけ", "覚えてる"]
 
 
 def extract_topic_terms(text: str):
@@ -22,14 +19,38 @@ def extract_topic_terms(text: str):
     return list(analyze_content(text).topics)
 
 
-class CurrentStateEngine:
-    """
-    v14.7:
-    Understand current LINE conversation state before retrieval.
+def _install_dynamic_search_context_hook():
+    """Make existing bot.py context-aware without changing its public API."""
+    try:
+        from dynamic_search import DynamicSearch
+    except Exception:
+        return
 
-    This does not try to be a full human mind-reader.
-    It gives the bot enough state to avoid treating every message as an isolated query.
-    """
+    original = getattr(DynamicSearch, "search", None)
+    if not original or getattr(original, "_ago_v14_25_context_hook", False):
+        return
+
+    def context_aware_search(self, query, *args, **kwargs):
+        resolved_query, ctx = resolve_query(query)
+        result = original(self, resolved_query, *args, **kwargs)
+        if isinstance(result, dict):
+            result["raw_query"] = query
+            result["resolved_query"] = resolved_query
+            result["conversation_state"] = ctx
+            result["inherited_topic"] = bool(ctx.get("subject_inherited"))
+            result["resolved_subject"] = ctx.get("resolved_subject", "")
+        return result
+
+    context_aware_search._ago_v14_25_context_hook = True
+    context_aware_search._ago_v14_25_original = original
+    DynamicSearch.search = context_aware_search
+
+
+_install_dynamic_search_context_hook()
+
+
+class CurrentStateEngine:
+    """Current-message interpretation enriched by v14.25 conversation state."""
 
     def __init__(self):
         pass
@@ -46,18 +67,19 @@ class CurrentStateEngine:
         history = list(history or [])
         last_topic_terms = list(last_topic_terms or [])
         search_result = search_result or {}
+        conversation = dict(search_result.get("conversation_state") or get_context())
 
         text = user_text or ""
         stripped = text.strip()
-        recent_text = "\n".join(history[-8:])
-
         topic_terms = list(search_result.get("topic_terms") or [])
         if not topic_terms:
-            topic_terms = extract_topic_terms(text)
+            topic_terms = extract_topic_terms(search_result.get("resolved_query") or text)
 
         attention_only = stripped in ATTENTION_ONLY_TERMS
-
-        inherited_topic = False
+        inherited_topic = bool(
+            search_result.get("inherited_topic")
+            or conversation.get("subject_inherited")
+        )
         if not attention_only and not topic_terms and last_topic_terms and (QUESTION_RE.search(text) or len(stripped) <= 14):
             topic_terms = last_topic_terms[:4]
             inherited_topic = True
@@ -66,7 +88,6 @@ class CurrentStateEngine:
         is_count_question = bool(COUNT_RE.search(text))
         called = self.called_directly(text)
         stopped = self.stopped(text)
-
         short = len(stripped) <= 14
         bare_topic = short and bool(topic_terms) and not is_question
         reaction_like = bool(REACTION_RE.search(stripped))
@@ -77,7 +98,6 @@ class CurrentStateEngine:
         hypothetical = qprof.get("is_hypothetical", False)
         exact_answer_cue = qprof.get("wants_exact_answer", False)
 
-        # Current conversation mode
         if stopped:
             intent = "stop"
         elif is_count_question:
@@ -92,6 +112,8 @@ class CurrentStateEngine:
             intent = "explanation_question"
         elif hypothetical:
             intent = "hypothetical_question"
+        elif conversation.get("follow_up_question"):
+            intent = "follow_up_question"
         elif is_question:
             intent = "question"
         elif called:
@@ -105,13 +127,10 @@ class CurrentStateEngine:
         else:
             intent = "statement"
 
-        # Whether bot should consider replying without direct call.
-        # Group LINE should not answer everything; but if relevant scene exists, short pings can reply.
         should_consider_reply = False
         if stopped:
             should_consider_reply = False
         elif is_first_message:
-            # The first incoming utterance is real input, not a wake token to discard.
             should_consider_reply = True
         elif called or is_question or bare_topic or reaction_like or attention_only:
             should_consider_reply = True
@@ -120,13 +139,8 @@ class CurrentStateEngine:
         elif last_topic_terms and short:
             should_consider_reply = True
 
-        # Preferred route
         if stopped:
             preferred_route = "silence"
-        elif is_first_message and reaction_like:
-            preferred_route = "fallback_only"
-        elif is_first_message and short and not is_question:
-            preferred_route = "scene_then_fallback"
         elif is_count_question:
             preferred_route = "canon"
         elif exact_answer_cue:
@@ -139,14 +153,16 @@ class CurrentStateEngine:
             preferred_route = "scene_then_fallback"
         elif attention_only:
             preferred_route = "fallback_only"
-        elif bare_topic or reaction_like or short:
+        elif conversation.get("follow_up_question"):
+            preferred_route = "scene_replay"
+        elif bare_topic or short:
             preferred_route = "scene_replay"
         elif is_question:
             preferred_route = "canon_then_scene"
         else:
             preferred_route = "scene_then_fallback"
 
-        state = {
+        return {
             "intent": intent,
             "preferred_route": preferred_route,
             "called": called,
@@ -169,5 +185,10 @@ class CurrentStateEngine:
             "should_consider_reply": should_consider_reply,
             "recent_history_size": len(history),
             "is_first_message": bool(is_first_message),
+            "follow_up_question": bool(conversation.get("follow_up_question")),
+            "subject_inherited": bool(conversation.get("subject_inherited")),
+            "resolved_subject": conversation.get("resolved_subject", ""),
+            "resolved_query": search_result.get("resolved_query") or conversation.get("resolved_query") or text,
+            "topic_stack": conversation.get("topic_stack", []),
+            "conversation_relation": conversation.get("relation", ""),
         }
-        return state
