@@ -7,7 +7,8 @@ import time
 import requests
 from flask import Flask, request, abort
 
-from bot import HashimotoArataBot
+from bot import AgoHashimotoBot
+from project_identity import health_payload, runtime_label
 from utils import normalize
 from webhook_event_store import mark_handled, was_handled
 
@@ -17,7 +18,7 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 DEBUG = os.environ.get("DEBUG_LOG", "1") == "1"
 
 app = Flask(__name__)
-bot = HashimotoArataBot()
+bot = AgoHashimotoBot()
 SENDER_NAME_CACHE = {}
 
 
@@ -137,12 +138,12 @@ def reply_line(reply_token: str, text: str, fallback_to_id: str | None = None) -
 
 @app.route("/", methods=["GET"])
 def index():
-    return "AI Hashimoto Arata v14.19 training general knowledge guard is running."
+    return f"{runtime_label()} is running."
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"ok": True, "version": "v14.23-persona-compiler", "time": int(time.time())}
+    return {"ok": True, **health_payload(), "time": int(time.time())}
 
 
 @app.route("/callback", methods=["GET"])

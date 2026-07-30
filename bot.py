@@ -21,6 +21,7 @@ from training_intent import contains_training_intent
 from speaker_resolver import SpeakerResolver, SpeakerProfile
 from shutdown_state import ShutdownStateStore
 from utils import clean_reply, normalize, de_ai_tone
+from project_identity import PROJECT_VERSION, runtime_label
 
 
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
@@ -37,7 +38,7 @@ WAKE_ONLY_TERMS = {
 }
 
 
-class HashimotoArataBot:
+class AgoHashimotoBot:
     def __init__(self):
         self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
         self.max_tokens = int(os.environ.get("MAX_TOKENS", "160"))
@@ -75,7 +76,7 @@ class HashimotoArataBot:
 
         print(
             "bot_init:",
-            "version=v14.23",
+            f"version={PROJECT_VERSION}",
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
@@ -587,3 +588,7 @@ class HashimotoArataBot:
             answer = ERROR_FALLBACK
 
         return self.finish(chat_id, user_text, answer)
+
+
+# Backward-compatible import name for older deployment code.
+HashimotoArataBot = AgoHashimotoBot
