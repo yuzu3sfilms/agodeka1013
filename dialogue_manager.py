@@ -32,6 +32,20 @@ GENERIC_TOPICS = {
     "今", "さっき", "話", "質問", "本当", "マジ",
 }
 
+# These are predicates / elliptical questions, not conversation subjects.
+# Japanese analysis may expose chunks such as 「写真ある」 as topics, so block
+# them before subject inheritance is decided.
+NON_SUBJECT_QUESTION_RE = re.compile(
+    r"^(?:"
+    r"強くなった|どうだった|どうなった|届いた|買った|見た|やった|行った|"
+    r"食べた|使った|写真ある|写真ない|どこ変わった|何が変わった|"
+    r"良かった|うまかった|大丈夫|本当|マジ|"
+    r".*(?:ある|ない|なった|だった|変わった|届いた|買った|見た|やった|"
+    r"行った|食べた|使った)"
+    r")[？?。！!]*$",
+    re.I,
+)
+
 
 @dataclass
 class DialogueRelation:
@@ -100,6 +114,11 @@ class DialogueManager:
         return len(text) <= 18 and bool(QUESTION_RE.search(text))
 
     def _explicit_subject(self, text: str) -> str:
+        # An omitted predicate question must inherit the previous subject.
+        # Example: 「写真ある？」 must not become subject=「写真ある」.
+        if NON_SUBJECT_QUESTION_RE.fullmatch((text or "").strip()):
+            return ""
+
         topics = self._topics(text)
         if not topics:
             return ""
@@ -172,7 +191,17 @@ class DialogueManager:
             self._remember_subject(chat_id, explicit_subject)
             resolved_subject = explicit_subject
 
+        # v14.25:
+        # bot.py's legacy v14.20 continuity branch intercepts plain "followup"
+        # before DynamicSearch. Once an omitted subject was successfully inherited,
+        # mark it as contextual_followup so it proceeds to resolved-query search and
+        # Replay selection. Repair requests still use the correction route.
+        routing_relation = rel.relation
+        if inherited and rel.relation in {"followup", "continuation_request"}:
+            routing_relation = "contextual_followup"
+
         data = asdict(rel)
+        data["relation"] = routing_relation
         data.update({
             "follow_up_question": follow_up,
             "subject_inherited": inherited,
@@ -191,7 +220,7 @@ class DialogueManager:
             "subject_inherited": inherited,
             "topic_shift": rel.topic_shift,
             "topic_stack": list(self._topic_stacks[chat_id]),
-            "relation": rel.relation,
+            "relation": routing_relation,
             "confidence": rel.confidence,
         })
         return data
