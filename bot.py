@@ -1,10 +1,10 @@
 import os
+import random
 import re
 import time
 from collections import defaultdict, deque
 
 from openai import OpenAI
-
 from dynamic_search import DynamicSearch
 from relationship import RelationshipProfile
 from relevance import RelevanceRanker
@@ -22,7 +22,6 @@ from speaker_resolver import SpeakerResolver, SpeakerProfile
 from shutdown_state import ShutdownStateStore
 from utils import clean_reply, normalize, de_ai_tone
 from project_identity import PROJECT_VERSION, runtime_label
-
 
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 CALL_TERMS = ["顎", "アゴ", "橋本", "橋本新", "あらくん", "あらた", "AGODEKA"]
@@ -51,7 +50,6 @@ class AgoHashimotoBot:
             api_key=os.environ["GROQ_API_KEY"],
             base_url="https://api.groq.com/openai/v1",
         )
-
         self.searcher = DynamicSearch()
         self.relationships = RelationshipProfile()
         self.ranker = RelevanceRanker()
@@ -61,8 +59,13 @@ class AgoHashimotoBot:
         self.current_state = CurrentStateEngine()
         self.reply_policy = ReplyPolicy()
         self.training_advisor = TrainingAdvisor()
-        self.ai_training_advisor = AITrainingAdvisor(client=self.client, model=self.model, memory=self.training_advisor.memory)
+        self.ai_training_advisor = AITrainingAdvisor(
+            client=self.client,
+            model=self.model,
+            memory=self.training_advisor.memory,
+        )
         self.speaker_resolver = SpeakerResolver()
+
         self.histories = defaultdict(lambda: deque(maxlen=self.history_len))
         self.dialogue = DialogueManager(max_turns=max(8, self.history_len * 2 + 2))
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
@@ -70,9 +73,32 @@ class AgoHashimotoBot:
         self.last_topic_terms = defaultdict(list)
         self.seen_chats = set()
         self.shutdown_store = ShutdownStateStore()
+
         self.continuity_seconds = int(os.environ.get("CONTINUITY_SECONDS", "420"))
         self.continuity_min_history = int(os.environ.get("CONTINUITY_MIN_HISTORY", "1"))
         self.continuity_probability = float(os.environ.get("CONTINUITY_REPLY_PROBABILITY", "0.75"))
+
+        # v14.27 spontaneous participation.
+        # This affects only undirected group/room conversation. Direct calls,
+        # questions, follow-ups and training consultations keep their normal route.
+        self.spontaneous_enabled = os.environ.get(
+            "SPONTANEOUS_PARTICIPATION_ENABLED", "1"
+        ).lower() not in {"0", "false", "off", "no"}
+        self.spontaneous_base_probability = float(
+            os.environ.get("SPONTANEOUS_BASE_PROBABILITY", "0.08")
+        )
+        self.spontaneous_max_probability = float(
+            os.environ.get("SPONTANEOUS_MAX_PROBABILITY", "0.58")
+        )
+        self.spontaneous_min_replay_score = int(
+            os.environ.get("SPONTANEOUS_MIN_REPLAY_SCORE", "145")
+        )
+        self.spontaneous_cooldown_seconds = int(
+            os.environ.get("SPONTANEOUS_COOLDOWN_SECONDS", "240")
+        )
+        self.spontaneous_min_history = int(
+            os.environ.get("SPONTANEOUS_MIN_HISTORY", "2")
+        )
 
         print(
             "bot_init:",
@@ -80,7 +106,10 @@ class AgoHashimotoBot:
             f"persona_judge={hasattr(self, 'persona_judge')}",
             f"persona_profile_loaded={bool(getattr(self.persona_judge, 'profile', None))}",
             f"topic_canon_loaded={bool(getattr(self.persona_judge, 'topic_canon', None))}",
-            f"replay_scenes={len(getattr(self.replay_engine, 'scenes', []))}", f"policy=True", f"training=True",
+            f"replay_scenes={len(getattr(self.replay_engine, 'scenes', []))}",
+            "policy=True",
+            "training=True",
+            f"spontaneous={self.spontaneous_enabled}",
             flush=True,
         )
 
@@ -100,18 +129,12 @@ class AgoHashimotoBot:
             return False
         if stripped in WAKE_ONLY_TERMS or normalized in {normalize(x) for x in WAKE_ONLY_TERMS}:
             return True
-        # Very short direct call.
         if len(stripped) <= 8 and any(term in stripped for term in CALL_TERMS):
             return True
         return False
 
     def should_wake_from_shutdown(self, text: str):
-        """Wake on the first substantive message and process that same message.
-
-        Shutdown means "do not continue the previous conversation"; it must not
-        consume or discard the next user's utterance. Explicit stop messages stay
-        silent and keep shutdown enabled.
-        """
+        """Wake on the first substantive message and process that same message."""
         t = (text or "").strip()
         if not t:
             return False, "empty_message"
@@ -153,7 +176,6 @@ class AgoHashimotoBot:
         )
         user = f"""会話関係:{relation.get('relation')}
 判定理由:{relation.get('reason')}
-
 会話:
 {history}
 
@@ -169,19 +191,13 @@ class AgoHashimotoBot:
 
     def should_inherit_topic(self, chat_id: str, user_text: str, raw_result: dict) -> bool:
         stripped = (user_text or "").strip()
-        # v14.4:
-        # Do not inherit previous topic for attention-only fillers.
-        # "ねえ" / "ちょっと" should not repeatedly trigger the last topic scene.
         if stripped in ATTENTION_ONLY_TERMS:
             return False
         if raw_result.get("topic_terms"):
             return False
         if not self.last_topic_terms[chat_id]:
             return False
-        # Inherit for short follow-up questions or vague replies.
         if self.is_question(user_text):
-            return True
-        if len(stripped) <= 12 and raw_result.get("candidate_hits", 0) == 0:
             return True
         return False
 
@@ -190,20 +206,17 @@ class AgoHashimotoBot:
         if topics:
             self.last_topic_terms[chat_id] = topics[:4]
 
-
     def called_directly(self, user_text: str) -> bool:
         nt = normalize(user_text)
         return any(normalize(t) in nt for t in CALL_TERMS)
 
     def is_question(self, user_text: str) -> bool:
-        return bool(re.search(r"[？?]|何|なに|誰|だれ|どこ|いつ|なんで|なぜ|どう|使う|作って|なの|の？|の\?", user_text))
+        return bool(re.search(
+            r"[？?]|何|なに|誰|だれ|どこ|いつ|なんで|なぜ|どう|使う|作って|なの|の？|の\?",
+            user_text,
+        ))
 
     def is_conversation_continuing(self, chat_id: str) -> bool:
-        """
-        v12.2:
-        If the bot has replied recently and the chat has some context,
-        do not suddenly go silent just because relevance dropped to zero.
-        """
         if len(self.histories[chat_id]) < self.continuity_min_history:
             return False
         last = self.last_reply_at[chat_id]
@@ -218,11 +231,139 @@ class AgoHashimotoBot:
             return True
         if not self.is_conversation_continuing(chat_id):
             return False
-        # Stable pseudo-randomness per text/chat; avoids replying to literally everything.
-        import random
         seed = hash((chat_id, user_text, int(time.time() // 60)))
         rng = random.Random(seed)
         return rng.random() < self.continuity_probability
+
+    def _is_group_or_room(self, chat_id: str) -> bool:
+        # LINE group IDs start with C, multi-person room IDs with R,
+        # one-to-one user IDs with U.
+        return bool(chat_id) and chat_id[:1] in {"C", "R"}
+
+    def _spontaneous_gate(
+        self,
+        chat_id: str,
+        user_text: str,
+        state: dict,
+        result: dict,
+        context: str,
+        speaker: SpeakerProfile,
+        dialogue_relation: dict,
+        is_first_message: bool,
+    ) -> dict:
+        """
+        Decide whether AGO joins an undirected group conversation.
+
+        The decision uses general evidence, not topic-specific hardcoding:
+        - actual historical Replay strength
+        - retrieval relevance
+        - conversation activity
+        - partner/scene continuity already included in Replay score
+        - cooldown since AGO last spoke
+        - stochastic participation probability
+
+        If this method says gate=True, normal automatic reply routing is replaced
+        by this decision for that undirected group turn.
+        """
+        base = {
+            "gate": False,
+            "participate": False,
+            "reason": "",
+            "probability": 0.0,
+            "roll": None,
+            "participation_score": 0.0,
+            "replay": None,
+            "replay_info": None,
+        }
+
+        if not self.spontaneous_enabled:
+            return {**base, "reason": "disabled"}
+        if not self._is_group_or_room(chat_id):
+            return {**base, "reason": "not_group"}
+        if is_first_message:
+            return {**base, "reason": "first_message"}
+        if state.get("called") or state.get("question"):
+            return {**base, "reason": "direct_or_question"}
+        if dialogue_relation.get("relation") not in {"new_topic", "topic_shift"}:
+            return {**base, "reason": "continuation_or_followup"}
+
+        # This is an undirected group statement: from here on, spontaneous
+        # participation owns the reply/silence decision.
+        base["gate"] = True
+
+        if len(self.histories[chat_id]) < self.spontaneous_min_history:
+            return {**base, "reason": "not_enough_group_history"}
+
+        since_last = time.time() - self.last_reply_at[chat_id] if self.last_reply_at[chat_id] else 10**9
+        if since_last < self.spontaneous_cooldown_seconds:
+            return {
+                **base,
+                "reason": "cooldown",
+                "cooldown_remaining": round(self.spontaneous_cooldown_seconds - since_last, 1),
+            }
+
+        replay, replay_info = self.replay_engine.choose(
+            user_text=user_text,
+            context=context,
+            topic_terms=result.get("topic_terms", []),
+            context_topic_terms=[],
+            intent=state.get("intent", ""),
+            current_speaker=speaker.canonical_name,
+        )
+        base["replay"] = replay
+        base["replay_info"] = replay_info
+
+        if not replay or not replay_info.get("chosen"):
+            return {**base, "reason": "no_grounded_replay"}
+
+        replay_score = float(replay_info["chosen"].get("score", 0))
+        if replay_score < self.spontaneous_min_replay_score:
+            return {
+                **base,
+                "reason": "replay_too_weak",
+                "replay_score": replay_score,
+            }
+
+        relevance_scores = [
+            float(x) for x in (result.get("relevance_scores", []) or [])
+            if isinstance(x, (int, float))
+        ]
+        relevance = max(relevance_scores, default=0.0)
+
+        # Normalize multiple independent signals. Replay score already contains
+        # same-partner and scene-continuity bonuses from ActualReplyEngine.
+        replay_strength = min(1.0, max(
+            0.0,
+            (replay_score - self.spontaneous_min_replay_score) / 140.0,
+        ))
+        relevance_strength = min(1.0, relevance / 150.0)
+        activity_strength = min(
+            1.0,
+            len(self.histories[chat_id]) / max(4.0, float(self.history_len)),
+        )
+
+        participation_score = (
+            replay_strength * 0.55
+            + relevance_strength * 0.25
+            + activity_strength * 0.20
+        )
+
+        probability = self.spontaneous_base_probability + participation_score * 0.50
+        probability = min(self.spontaneous_max_probability, max(0.0, probability))
+
+        roll = random.SystemRandom().random()
+        participate = roll < probability
+
+        return {
+            **base,
+            "participate": participate,
+            "reason": "roll_pass" if participate else "roll_silence",
+            "probability": round(probability, 4),
+            "roll": round(roll, 4),
+            "participation_score": round(participation_score, 4),
+            "replay_score": replay_score,
+            "relevance": relevance,
+        }
 
     def fallback_prompt(self, user_text: str, context: str, chat_id: str, question: bool, speaker: SpeakerProfile):
         relation_style = "\n".join(self.relationships.style_samples(n=4))
@@ -238,7 +379,6 @@ class AgoHashimotoBot:
         user = f"""mode:{'Q' if question else 'continue'}
 発言:{user_text}
 直近:{context}
-
 相手情報:
 {speaker.prompt_block()}
 
@@ -252,18 +392,24 @@ class AgoHashimotoBot:
 候補4: ..."""
         return system, user
 
-
     def remove_unverified_vocative(self, text: str, speaker: SpeakerProfile) -> str:
-        """Block generated forms of address that are not licensed by replay evidence.
-
-        Speaker resolution identifies who spoke; it does not prove how Hashimoto
-        addresses that person. Generated fallback replies therefore use no vocative.
-        """
         out = (text or "").strip()
-        labels = [speaker.address, speaker.canonical_name, speaker.display_name, *speaker.aliases]
-        for label in sorted({x.strip() for x in labels if x and x.strip()}, key=len, reverse=True):
-            # Remove only a leading vocative, never occurrences inside substantive text.
-            out = re.sub(rf"^(?:{re.escape(label)})(?:さん|くん|君)?[、,\s]+", "", out).strip()
+        labels = [
+            speaker.address,
+            speaker.canonical_name,
+            speaker.display_name,
+            *speaker.aliases,
+        ]
+        for label in sorted(
+            {x.strip() for x in labels if x and x.strip()},
+            key=len,
+            reverse=True,
+        ):
+            out = re.sub(
+                rf"^(?:{re.escape(label)})(?:さん|くん|君)?[、,\s]+",
+                "",
+                out,
+            ).strip()
         return out
 
     def groq_available(self) -> bool:
@@ -276,7 +422,9 @@ class AgoHashimotoBot:
         episode_block = self.searcher.format_episodes(search_result)
         style_from_episode = self.searcher.format_style(search_result)
         relation_block = self.relationships.format()
-        relation_style = "\n".join(f"- {x}" for x in self.relationships.style_samples(6))
+        relation_style = "\n".join(
+            f"- {x}" for x in self.relationships.style_samples(6)
+        )
         terms = ", ".join(search_result.get("terms", [])[:8])
         topic_terms = ", ".join(search_result.get("topic_terms", [])[:8])
         predicates = ", ".join(search_result.get("predicates", [])[:8])
@@ -284,7 +432,6 @@ class AgoHashimotoBot:
         reasons = str(search_result.get("relevance_reasons", []))[:300]
         recent = "\n".join(context.splitlines()[-2:])
         question = self.is_question(user_text)
-
         system = (
             "あなたは橋本新本人風のAIアカウント。ただしこれは最後の保険生成。過去ログ実返答が使えない時だけ使われる。"
             "グループ内では「あらくん」「橋本」「顎」「AGODEKA」と呼ばれる同一人物として返す。"
@@ -302,7 +449,6 @@ class AgoHashimotoBot:
             "語尾でキャラを作らない。"
             "「ぜ」「ないよ」「だよ」「よな」「だよな」「だよね」「なんだよね」「です」「ます」禁止。"
         )
-
         user = f"""mode:{'Q' if question else 'react'}
 発言:{user_text}
 
@@ -343,95 +489,181 @@ class AgoHashimotoBot:
 橋本新として、短い候補を4つ出す。"""
         return system, user
 
-    def reply(self, chat_id: str, user_text: str, sender_id: str | None = None, sender_display_name: str | None = None) -> str | None:
+    def reply(
+        self,
+        chat_id: str,
+        user_text: str,
+        sender_id: str | None = None,
+        sender_display_name: str | None = None,
+    ) -> str | None:
         is_first_message = chat_id not in self.seen_chats
         self.seen_chats.add(chat_id)
+
         context = self.context(chat_id, user_text)
-        print("conversation_entry:", {"is_first_message": is_first_message, "history_size": len(self.histories[chat_id])}, flush=True)
-        speaker = self.speaker_resolver.resolve(sender_id=sender_id, display_name=sender_display_name)
-        print("speaker_resolution:", {"canonical": speaker.canonical_name, "display": speaker.display_name, "address": speaker.address, "confidence": speaker.confidence, "source": speaker.source}, flush=True)
+        print(
+            "conversation_entry:",
+            {
+                "is_first_message": is_first_message,
+                "history_size": len(self.histories[chat_id]),
+            },
+            flush=True,
+        )
+
+        speaker = self.speaker_resolver.resolve(
+            sender_id=sender_id,
+            display_name=sender_display_name,
+        )
+        print(
+            "speaker_resolution:",
+            {
+                "canonical": speaker.canonical_name,
+                "display": speaker.display_name,
+                "address": speaker.address,
+                "confidence": speaker.confidence,
+                "source": speaker.source,
+            },
+            flush=True,
+        )
+
         dialogue_relation = self.dialogue.classify(chat_id, user_text)
         print("dialogue_relation:", dialogue_relation, flush=True)
 
-        # v14.11: shutdown wake check.
-        # Do not discard the first wake message. If it wakes the bot,
-        # continue into normal processing with the same user_text.
         if self.is_shutdown(chat_id):
             wake, reason = self.should_wake_from_shutdown(user_text)
-            print("shutdown_state:", True, "wake_check:", wake, f"reason={reason}", flush=True)
+            print(
+                "shutdown_state:",
+                True,
+                "wake_check:",
+                wake,
+                f"reason={reason}",
+                flush=True,
+            )
             if not wake:
                 print("generation path: shutdown_silence", flush=True)
                 return self.finish(chat_id, user_text, None)
 
             self.set_shutdown(chat_id, False)
-            print("shutdown_state:", False, "wake_consumed_first_message:", False, flush=True)
-
+            print(
+                "shutdown_state:",
+                False,
+                "wake_consumed_first_message:",
+                False,
+                flush=True,
+            )
             if self.is_wake_only(user_text):
                 answer = "あはい"
                 print("generation path: wake_v14_11_short_ack", flush=True)
                 return self.finish(chat_id, user_text, answer)
 
-        # v14.9: AI training consultation route first.
-        # Training advice is no longer past-log replay or hardcoded menu only.
-        # It uses a general AI advisor, while keeping AIあらくん behavior and safety rules.
         training_context = self.training_advisor._context(chat_id)
         training_context = dict(training_context or {})
         training_context["speaker_instruction"] = speaker.prompt_block()
         training_context["dialogue_relation"] = dialogue_relation
-        training_context["recent_dialogue"] = self.dialogue.context(chat_id, limit=6)
-        training = self.ai_training_advisor.answer(chat_id, user_text, context=training_context)
-        print("ai_training_advisor:", {k: v for k, v in training.items() if k != "answer"}, flush=True)
+        training_context["recent_dialogue"] = self.dialogue.context(
+            chat_id,
+            limit=6,
+        )
+        training = self.ai_training_advisor.answer(
+            chat_id,
+            user_text,
+            context=training_context,
+        )
+        print(
+            "ai_training_advisor:",
+            {k: v for k, v in training.items() if k != "answer"},
+            flush=True,
+        )
         if training.get("used"):
             answer = training["answer"]
-            # Store context and logs through the legacy helper.
             intent = training.get("intent") or {}
             if intent.get("intent") == "log_workout":
                 self.training_advisor.memory.add(chat_id, user_text)
-            self.training_advisor._remember_context(chat_id, intent, answer)
-            print(f"generation path: training_v14_11_{training.get('kind', 'advisor')}", flush=True)
+            self.training_advisor._remember_context(
+                chat_id,
+                intent,
+                answer,
+            )
+            print(
+                f"generation path: training_v14_11_{training.get('kind', 'advisor')}",
+                flush=True,
+            )
             return self.finish(chat_id, user_text, answer)
 
-        # v14.20: unresolved reactions and elliptical follow-ups are responses to
-        # the previous exchange, not fresh episode-search queries.
-        if dialogue_relation.get("relation") in {"repair_request", "followup", "continuation_request"}:
+        if dialogue_relation.get("relation") in {
+            "repair_request",
+            "followup",
+            "continuation_request",
+        }:
             if self.groq_available():
                 try:
-                    system, user = self.continuity_prompt(user_text, chat_id, dialogue_relation, speaker)
+                    system, user = self.continuity_prompt(
+                        user_text,
+                        chat_id,
+                        dialogue_relation,
+                        speaker,
+                    )
                     res = self.client.chat.completions.create(
                         model=self.model,
-                        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user},
+                        ],
                         temperature=min(self.temperature, 0.65),
                         max_tokens=self.max_tokens,
                     )
-                    raw = de_ai_tone(res.choices[0].message.content or "")
+                    raw = de_ai_tone(
+                        res.choices[0].message.content or ""
+                    )
                     print("continuity_groq_raw:", raw, flush=True)
                     candidates = self.persona_judge.split_candidates(raw)
                     cleaned = []
                     for cand in candidates:
-                        cand = self.remove_unverified_vocative(clean_reply(user_text, cand), speaker)
+                        cand = self.remove_unverified_vocative(
+                            clean_reply(user_text, cand),
+                            speaker,
+                        )
                         guarded, _ = guard_reply(cand, user_text)
                         if guarded:
                             cleaned.append(guarded)
-                    chosen, judge_info = self.persona_judge.choose(cleaned, user_text, {"episodes": [], "topic_terms": []})
-                    print("continuity_persona_judge:", judge_info, flush=True)
+                    chosen, judge_info = self.persona_judge.choose(
+                        cleaned,
+                        user_text,
+                        {"episodes": [], "topic_terms": []},
+                    )
+                    print(
+                        "continuity_persona_judge:",
+                        judge_info,
+                        flush=True,
+                    )
                     if chosen:
-                        print("generation path: dialogue_v14_20_contextual_continuity", flush=True)
+                        print(
+                            "generation path: dialogue_v14_20_contextual_continuity",
+                            flush=True,
+                        )
                         return self.finish(chat_id, user_text, chosen)
                 except Exception as e:
-                    print("continuity_groq_error:", repr(e), flush=True)
-            # Deterministic repair fallback is preferable to inventing an old topic.
+                    print(
+                        "continuity_groq_error:",
+                        repr(e),
+                        flush=True,
+                    )
+
             if dialogue_relation.get("relation") == "repair_request":
                 answer = "今の返し変でした。言い直します"
             else:
                 answer = "その話の続きでいいです"
-            print("generation path: dialogue_v14_20_safe_fallback", flush=True)
+            print(
+                "generation path: dialogue_v14_20_safe_fallback",
+                flush=True,
+            )
             return self.finish(chat_id, user_text, answer)
 
-        # v14.13 evidence-first routing:
-        # Never mutate the live utterance by appending a previous topic.
-        # Current text and conversational topic remain separate evidence channels.
         raw_result = self.searcher.search(user_text)
-        result = self.ranker.rerank(user_text, raw_result, max_selected=2)
+        result = self.ranker.rerank(
+            user_text,
+            raw_result,
+            max_selected=2,
+        )
         result["inherited_topic"] = False
 
         state = self.current_state.classify(
@@ -441,11 +673,10 @@ class AgoHashimotoBot:
             search_result=result,
             is_first_message=is_first_message,
         )
-
         called = state.get("called", False)
         question = state.get("question", False)
-        print("current_state:", state, flush=True)
 
+        print("current_state:", state, flush=True)
         print(
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
@@ -470,74 +701,209 @@ class AgoHashimotoBot:
 
         self.remember_topics(chat_id, result)
 
+        # v14.27: undirected group messages are no longer automatic replies.
+        # They pass through an evidence-based stochastic participation gate.
+        spontaneous = self._spontaneous_gate(
+            chat_id=chat_id,
+            user_text=user_text,
+            state=state,
+            result=result,
+            context=context,
+            speaker=speaker,
+            dialogue_relation=dialogue_relation,
+            is_first_message=is_first_message,
+        )
+        print(
+            "spontaneous_participation:",
+            {
+                k: v
+                for k, v in spontaneous.items()
+                if k not in {"replay", "replay_info"}
+            },
+            flush=True,
+        )
+
+        if spontaneous.get("gate"):
+            if spontaneous.get("participate") and spontaneous.get("replay"):
+                replay = spontaneous["replay"]
+                replay_info = spontaneous.get("replay_info") or {}
+                print(
+                    "spontaneous_replay_engine:",
+                    replay_info,
+                    flush=True,
+                )
+                guarded, guard_info = guard_reply(
+                    replay,
+                    user_text,
+                    preserve_long=True,
+                )
+                if guarded != replay:
+                    print(
+                        "style_guard:",
+                        guard_info,
+                        flush=True,
+                    )
+                print(
+                    "generation path: spontaneous_v14_27_scene_participation",
+                    flush=True,
+                )
+                return self.finish(chat_id, user_text, guarded)
+
+            print(
+                "generation path: spontaneous_v14_27_silence",
+                flush=True,
+            )
+            return self.finish(chat_id, user_text, None)
+
         no_relevant_episode = not result.get("episodes")
-        policy = self.reply_policy.plan(state, has_relevant_episode=not no_relevant_episode)
+        policy = self.reply_policy.plan(
+            state,
+            has_relevant_episode=not no_relevant_episode,
+        )
         print("reply_policy:", policy, flush=True)
 
         if not policy.get("reply"):
             print("generation path: policy_silence", flush=True)
             return self.finish(chat_id, user_text, None)
 
-        if no_relevant_episode and not self.should_continue_reply(chat_id, user_text, called, question):
+        if (
+            no_relevant_episode
+            and not self.should_continue_reply(
+                chat_id,
+                user_text,
+                called,
+                question,
+            )
+        ):
             if "fallback" not in policy.get("routes", []):
-                print("generation path: no_relevant_episode_ignore", flush=True)
+                print(
+                    "generation path: no_relevant_episode_ignore",
+                    flush=True,
+                )
                 return self.finish(chat_id, user_text, None)
 
         if not no_relevant_episode and "canon" in policy.get("routes", []):
-            canon, canon_info = self.canon_answer.answer(user_text, result)
+            canon, canon_info = self.canon_answer.answer(
+                user_text,
+                result,
+            )
             if canon:
-                guarded, guard_info = guard_reply(canon, user_text)
+                guarded, guard_info = guard_reply(
+                    canon,
+                    user_text,
+                )
                 print("canon_answer:", canon_info, flush=True)
                 if guarded != canon:
-                    print("style_guard:", guard_info, flush=True)
-                answer = guarded
-                print("generation path: canon_v14_11_policy_answer", flush=True)
-                return self.finish(chat_id, user_text, answer)
+                    print(
+                        "style_guard:",
+                        guard_info,
+                        flush=True,
+                    )
+                print(
+                    "generation path: canon_v14_11_policy_answer",
+                    flush=True,
+                )
+                return self.finish(chat_id, user_text, guarded)
             else:
-                print("canon_answer_skip:", canon_info, flush=True)
+                print(
+                    "canon_answer_skip:",
+                    canon_info,
+                    flush=True,
+                )
         elif "canon" not in policy.get("routes", []):
-            print("canon_answer_skip:", {"used": False, "reason": "policy_skipped_canon"}, flush=True)
+            print(
+                "canon_answer_skip:",
+                {
+                    "used": False,
+                    "reason": "policy_skipped_canon",
+                },
+                flush=True,
+            )
 
-        # v14.3: actual-reply-first replay engine controlled by reply_policy.
-        # If a similar past situation exists, replay an actual Hashimoto reply
-        # before asking Groq to invent anything.
         if "scene_replay" in policy.get("routes", []):
             if not no_relevant_episode:
                 replay, replay_info = self.replay_engine.choose(
                     user_text=user_text,
                     context=context,
                     topic_terms=result.get("topic_terms", []),
-                    context_topic_terms=(state.get("topic_terms", []) if state.get("inherited_topic") else []),
+                    context_topic_terms=(
+                        state.get("topic_terms", [])
+                        if state.get("inherited_topic")
+                        else []
+                    ),
                     intent=state.get("intent", ""),
                     current_speaker=speaker.canonical_name,
                 )
                 print("replay_engine:", replay_info, flush=True)
                 if replay:
-                    guarded, guard_info = guard_reply(replay, user_text)
+                    # Historical Replay is allowed to keep its original length.
+                    guarded, guard_info = guard_reply(
+                        replay,
+                        user_text,
+                        preserve_long=True,
+                    )
                     if guarded != replay:
-                        print("style_guard:", guard_info, flush=True)
-                    answer = guarded
-                    print("generation path: replay_v14_11_intent_ranked_scene_reply", flush=True)
-                    return self.finish(chat_id, user_text, answer)
+                        print(
+                            "style_guard:",
+                            guard_info,
+                            flush=True,
+                        )
+                    print(
+                        "generation path: replay_v14_27_intent_ranked_scene_reply",
+                        flush=True,
+                    )
+                    return self.finish(
+                        chat_id,
+                        user_text,
+                        guarded,
+                    )
             else:
-                print("replay_engine_skip: no_relevant_episode", flush=True)
+                print(
+                    "replay_engine_skip: no_relevant_episode",
+                    flush=True,
+                )
         else:
-            print("replay_engine_skip: policy_skipped_scene_replay", flush=True)
+            print(
+                "replay_engine_skip: policy_skipped_scene_replay",
+                flush=True,
+            )
 
         if "fallback" not in policy.get("routes", []):
-            print("generation path: policy_no_fallback_silence", flush=True)
+            print(
+                "generation path: policy_no_fallback_silence",
+                flush=True,
+            )
             return self.finish(chat_id, user_text, None)
 
         if not self.groq_available():
-            print("generation path: groq_cooldown_capyi", flush=True)
-            answer = ERROR_FALLBACK
-            return self.finish(chat_id, user_text, answer)
+            print(
+                "generation path: groq_cooldown_capyi",
+                flush=True,
+            )
+            return self.finish(
+                chat_id,
+                user_text,
+                ERROR_FALLBACK,
+            )
 
         try:
             if no_relevant_episode:
-                system, user = self.fallback_prompt(user_text, context, chat_id, question, speaker)
+                system, user = self.fallback_prompt(
+                    user_text,
+                    context,
+                    chat_id,
+                    question,
+                    speaker,
+                )
             else:
-                system, user = self.build_prompt(user_text, context, result, chat_id, speaker)
+                system, user = self.build_prompt(
+                    user_text,
+                    context,
+                    result,
+                    chat_id,
+                    speaker,
+                )
+
             res = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -549,7 +915,6 @@ class AgoHashimotoBot:
             )
             raw = res.choices[0].message.content or ""
             print("groq_raw:", raw, flush=True)
-
             raw = de_ai_tone(raw)
             candidates = self.persona_judge.split_candidates(raw)
             print("persona_candidates:", candidates, flush=True)
@@ -557,38 +922,75 @@ class AgoHashimotoBot:
             cleaned_candidates = []
             for cand in candidates:
                 cand_clean = clean_reply(user_text, cand)
-                guarded, guard_info = guard_reply(cand_clean, user_text)
+                guarded, guard_info = guard_reply(
+                    cand_clean,
+                    user_text,
+                )
                 if guarded != cand_clean:
-                    print("style_guard_candidate:", guard_info, "orig=", cand_clean, "guarded=", guarded, flush=True)
-                guarded = self.remove_unverified_vocative(guarded, speaker)
+                    print(
+                        "style_guard_candidate:",
+                        guard_info,
+                        "orig=",
+                        cand_clean,
+                        "guarded=",
+                        guarded,
+                        flush=True,
+                    )
+                guarded = self.remove_unverified_vocative(
+                    guarded,
+                    speaker,
+                )
                 if guarded:
                     cleaned_candidates.append(guarded)
 
-            chosen, judge_info = self.persona_judge.choose(cleaned_candidates, user_text, result)
+            chosen, judge_info = self.persona_judge.choose(
+                cleaned_candidates,
+                user_text,
+                result,
+            )
             print("persona_judge:", judge_info, flush=True)
 
             answer = chosen
-
-            if not answer or answer in set(self.last_bot_replies[chat_id]):
-                print("generation path: persona_judge_reject_capyi", flush=True)
+            if (
+                not answer
+                or answer in set(self.last_bot_replies[chat_id])
+            ):
+                print(
+                    "generation path: persona_judge_reject_capyi",
+                    flush=True,
+                )
                 answer = ERROR_FALLBACK
             else:
                 if no_relevant_episode:
-                    print("generation path: groq_v14_11_policy_fallback_continuity", flush=True)
+                    print(
+                        "generation path: groq_v14_11_policy_fallback_continuity",
+                        flush=True,
+                    )
                 else:
-                    print("generation path: groq_v14_11_policy_fallback_episode", flush=True)
-
+                    print(
+                        "generation path: groq_v14_11_policy_fallback_episode",
+                        flush=True,
+                    )
         except Exception as e:
             print("Groq error:", repr(e), flush=True)
-            if "429" in str(e) or "rate_limit" in str(e) or "TPD" in str(e):
+            if (
+                "429" in str(e)
+                or "rate_limit" in str(e)
+                or "TPD" in str(e)
+            ):
                 self.disable_groq()
-                print("generation path: groq_429_capyi", flush=True)
+                print(
+                    "generation path: groq_429_capyi",
+                    flush=True,
+                )
             else:
-                print("generation path: groq_exception_capyi", flush=True)
+                print(
+                    "generation path: groq_exception_capyi",
+                    flush=True,
+                )
             answer = ERROR_FALLBACK
 
         return self.finish(chat_id, user_text, answer)
 
 
-# Backward-compatible import name for older deployment code.
 HashimotoArataBot = AgoHashimotoBot
