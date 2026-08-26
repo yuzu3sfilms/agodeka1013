@@ -39,8 +39,10 @@ WAKE_ONLY_TERMS = {
 
 class AgoHashimotoBot:
     def __init__(self):
-        self.model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
         self.max_tokens = int(os.environ.get("MAX_TOKENS", "160"))
+        self.groq_completion_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "512"))
+        self.groq_reasoning_effort = os.environ.get("GROQ_REASONING_EFFORT", "low")
         self.temperature = float(os.environ.get("TEMPERATURE", "1.0"))
         self.history_len = int(os.environ.get("HISTORY_LEN", "4"))
         self.cooldown_seconds = int(os.environ.get("RATE_LIMIT_COOLDOWN_SECONDS", "900"))
@@ -110,6 +112,8 @@ class AgoHashimotoBot:
             "policy=True",
             "training=True",
             f"spontaneous={self.spontaneous_enabled}",
+            f"groq_reasoning={self.groq_reasoning_effort}",
+            f"groq_max_completion_tokens={self.groq_completion_tokens}",
             flush=True,
         )
 
@@ -419,15 +423,32 @@ class AgoHashimotoBot:
         self.groq_disabled_until = time.time() + self.cooldown_seconds
 
     def completion_text(self, response, label: str = "groq") -> str:
-        """Return usable completion text and drop a token-truncated final line.
-
-        When the API reports finish_reason='length', the last line may be an
-        incomplete candidate. Keep earlier complete candidates and discard only
-        that final fragment.
-        """
+        """Log Groq token use and return only complete candidate text."""
         choice = response.choices[0]
-        raw = choice.message.content or ""
+        message = choice.message
+        raw = message.content or ""
         finish_reason = getattr(choice, "finish_reason", None)
+
+        usage = getattr(response, "usage", None)
+        details = getattr(usage, "completion_tokens_details", None) if usage else None
+        reasoning_tokens = getattr(details, "reasoning_tokens", None) if details else None
+        reasoning = getattr(message, "reasoning", None)
+        print(
+            f"{label}_usage:",
+            {
+                "model": self.model,
+                "finish_reason": finish_reason,
+                "prompt_tokens": getattr(usage, "prompt_tokens", None) if usage else None,
+                "completion_tokens": getattr(usage, "completion_tokens", None) if usage else None,
+                "reasoning_tokens": reasoning_tokens,
+                "total_tokens": getattr(usage, "total_tokens", None) if usage else None,
+                "reasoning_chars": len(reasoning) if isinstance(reasoning, str) else None,
+                "content_chars": len(raw),
+                "reasoning_effort": self.groq_reasoning_effort,
+                "max_completion_tokens": self.groq_completion_tokens,
+            },
+            flush=True,
+        )
 
         if finish_reason == "length":
             lines = raw.splitlines()
@@ -647,7 +668,8 @@ class AgoHashimotoBot:
                             {"role": "user", "content": user},
                         ],
                         temperature=min(self.temperature, 0.65),
-                        max_tokens=max(self.max_tokens, 240),
+                        max_completion_tokens=max(self.groq_completion_tokens, 384),
+                        extra_body={"reasoning_effort": self.groq_reasoning_effort},
                     )
                     raw = de_ai_tone(
                         self.completion_text(res, "continuity_groq")
@@ -949,7 +971,8 @@ class AgoHashimotoBot:
                     {"role": "user", "content": user},
                 ],
                 temperature=self.temperature,
-                max_tokens=max(self.max_tokens, 240),
+                max_completion_tokens=max(self.groq_completion_tokens, 384),
+                extra_body={"reasoning_effort": self.groq_reasoning_effort},
             )
             raw = self.completion_text(res, "groq")
             print("groq_raw:", raw, flush=True)
