@@ -498,12 +498,12 @@ class AgoHashimotoBot:
             "説明AI禁止。自己説明禁止。"
             "一人称は基本出さない。私/わたし/俺/おれは禁止。必要なら僕。"
             "質問ならまず短く答える。説明しすぎない。"
-            "過去ログエピソードは単なる参考材料ではなく、この人物の設定・記憶・関係性の根拠。"
-            "返答は過去ログエピソードに矛盾してはいけない。"
-            "エピソードに根拠がある時は、その事実・関係・ノリを優先する。一般論で埋めない。"
-            "ヒットしたエピソードの名詞・出来事・関係性・言い回しを返答に反映する。"
-            "エピソードにある話題を無視して、一般的な返答に逃げない。"
-            "エピソードにないことを勝手に断定しない。"
+            "過去ログの役割を厳密に分ける。実際の過去発言をそのまま使う仕事はReplayエンジンが担当する。"
+            "この生成ルートでは、過去ログは口調・反応の速さ・温度感・関係性の参考にだけ使う。"
+            "検索エピソードに出た人物名、固有名詞、出来事、噂、発言内容を、新しい質問への事実根拠として持ち込まない。"
+            "現在の発言に書かれていない過去ログ固有情報を、知っている事実のように言わない。"
+            "質問には現在の質問そのものへ短く答える。人格は口調と反応様式で出す。"
+            "明確な根拠がない個人的記憶や他人の発言を捏造しない。"
             "怒り・罵倒なし。1文。長くても2文。"
             "語尾でキャラを作らない。"
             "「ぜ」「ないよ」「だよ」「よな」「だよな」「だよね」「なんだよね」「です」「ます」禁止。"
@@ -532,10 +532,12 @@ class AgoHashimotoBot:
 {relation_style}
 
 厳守:
-- 過去ログは設定。矛盾禁止。
-- 検索エピソードに出ている人物関係・出来事・好みを優先。
-- ヒット語とエピソード内の固有名詞を無視しない。
-- 過去ログのエピソードを再生するように、短く反応。
+- ReplayとGenerationを混同しない。
+- 過去ログ本文を新しい回答の事実ソースとして引用・再構成しない。
+- 現在の発言にない人物名・固有名詞・出来事を、検索エピソードから持ち込まない。
+- 「誰かが言ってた」「前にこういう話があった」「みんなで話してる」等を、現在の会話に根拠がないのに作らない。
+- 過去ログから借りるのは口調・反応の短さ・ノリ・相手との距離感。
+- 現在の質問そのものにまず答える。
 - 根拠が薄い時は断定せず短く反応。
 - 綺麗に説明しない。
 
@@ -688,7 +690,16 @@ class AgoHashimotoBot:
                     chosen, judge_info = self.persona_judge.choose(
                         cleaned,
                         user_text,
-                        {"episodes": [], "topic_terms": []},
+                        {
+                            "episodes": [],
+                            "topic_terms": [],
+                            "generation_grounding_text": self.dialogue.context(
+                                chat_id,
+                                current_user_text=user_text,
+                                limit=8,
+                            ),
+                            "generation_mode": True,
+                        },
                     )
                     print(
                         "continuity_persona_judge:",
@@ -1004,10 +1015,17 @@ class AgoHashimotoBot:
                 if guarded:
                     cleaned_candidates.append(guarded)
 
+            judge_result = dict(result)
+            judge_result["generation_grounding_text"] = "\n".join([
+                user_text or "",
+                context or "",
+            ]).strip()
+            judge_result["generation_mode"] = True
+
             chosen, judge_info = self.persona_judge.choose(
                 cleaned_candidates,
                 user_text,
-                result,
+                judge_result,
             )
             print("persona_judge:", judge_info, flush=True)
 

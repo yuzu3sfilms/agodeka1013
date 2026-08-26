@@ -69,6 +69,78 @@ def _candidate_act_matches(candidate: str, user_text: str) -> bool:
     return True
 
 
+ATTRIBUTION_RE = re.compile(
+    r"(?:誰か|みんな|みんなで|[一-龥ァ-ヴA-Za-z0-9_]{1,20})(?:が|は)?"
+    r"(?:言ってた|言ってる|話してた|話してる|聞いた|言った|"
+    r"取られた|見た|いたって|いるって)"
+)
+
+COMMON_GENERATION_WORDS = {
+    "宇宙人", "人類", "自分", "相手", "今日", "明日", "昨日",
+    "そう", "たぶん", "多分", "いる", "いない", "ある", "ない",
+    "思う", "思って", "みたい", "怖い", "好き", "嫌い",
+}
+
+
+def _episode_speakers(search_result: dict) -> set[str]:
+    speakers = set()
+    for line in "\n".join(
+        (episode.get("window", "") or "")
+        for episode in search_result.get("episodes", []) or []
+    ).splitlines():
+        if ":" not in line:
+            continue
+        name = line.split(":", 1)[0].strip()
+        if 1 <= len(name) <= 32:
+            speakers.add(name)
+    return speakers
+
+
+def _grounding_text(user_text: str, search_result: dict) -> str:
+    parts = [
+        user_text or "",
+        search_result.get("generation_grounding_text", "") or "",
+        " ".join(search_result.get("topic_terms", []) or []),
+        " ".join(search_result.get("predicates", []) or []),
+        str(
+            (search_result.get("conversation_state") or {}).get(
+                "resolved_subject", ""
+            )
+        ),
+    ]
+    return "\n".join(x for x in parts if x)
+
+
+def _episode_only_tokens(candidate: str, user_text: str, search_result: dict):
+    episode = "\n".join(
+        (episode.get("window", "") or "")
+        for episode in search_result.get("episodes", []) or []
+    )
+    if not episode:
+        return []
+
+    grounding = normalize(_grounding_text(user_text, search_result))
+    episode_n = normalize(episode)
+
+    tokens = re.findall(
+        r"[ァ-ヴｦ-ﾟー]{2,}|[A-Za-z][A-Za-z0-9_\-]{2,}|"
+        r"[一-龥々〆ヵヶ]{2,}",
+        candidate or "",
+    )
+    out = []
+    for token in tokens:
+        nt = normalize(token)
+        if not nt or len(nt) < 2:
+            continue
+        if token in COMMON_GENERATION_WORDS:
+            continue
+        if nt in grounding:
+            continue
+        if nt in episode_n and token not in out:
+            out.append(token)
+    return out
+
+
 class PersonaJudge:
     """
     Generated-candidate judge.
@@ -246,14 +318,57 @@ class PersonaJudge:
             c,
             search_result,
         )
-        if overlap_hits:
-            score += 18 + min(len(overlap_hits), 4) * 8
-            reasons.append(
-                f"episode_overlap:{','.join(overlap_hits[:4])}"
+
+        if search_result.get("generation_mode"):
+            episode_only = _episode_only_tokens(
+                c,
+                user_text,
+                search_result,
             )
-        elif candidate_tokens and search_result.get("episodes"):
-            score -= 28
-            reasons.append("no_episode_overlap")
+            episode_speakers = _episode_speakers(search_result)
+            grounding_n = normalize(
+                _grounding_text(user_text, search_result)
+            )
+            imported_speakers = [
+                name for name in episode_speakers
+                if name
+                and normalize(name) in nc
+                and normalize(name) not in grounding_n
+            ]
+
+            if imported_speakers:
+                score -= 85
+                reasons.append(
+                    "imported_episode_speaker:"
+                    + ",".join(imported_speakers[:3])
+                )
+
+            if episode_only:
+                penalty = min(90, 28 + len(episode_only) * 18)
+                score -= penalty
+                reasons.append(
+                    "episode_only_content:"
+                    + ",".join(episode_only[:4])
+                )
+
+            if ATTRIBUTION_RE.search(c):
+                attribution_grounded = any(
+                    normalize(name) in grounding_n
+                    for name in episode_speakers
+                    if name
+                )
+                if not attribution_grounded:
+                    score -= 90
+                    reasons.append("ungrounded_attribution")
+        else:
+            if overlap_hits:
+                score += 18 + min(len(overlap_hits), 4) * 8
+                reasons.append(
+                    f"episode_overlap:{','.join(overlap_hits[:4])}"
+                )
+            elif candidate_tokens and search_result.get("episodes"):
+                score -= 28
+                reasons.append("no_episode_overlap")
 
         if topics:
             if any(normalize(topic) in nc for topic in topics):
@@ -351,5 +466,6 @@ class PersonaJudge:
                 "relationship",
                 "persona",
                 "episode",
+                "provenance",
             ],
         }
