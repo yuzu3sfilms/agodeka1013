@@ -418,6 +418,44 @@ class AgoHashimotoBot:
     def disable_groq(self):
         self.groq_disabled_until = time.time() + self.cooldown_seconds
 
+    def completion_text(self, response, label: str = "groq") -> str:
+        """Return usable completion text and drop a token-truncated final line.
+
+        When the API reports finish_reason='length', the last line may be an
+        incomplete candidate. Keep earlier complete candidates and discard only
+        that final fragment.
+        """
+        choice = response.choices[0]
+        raw = choice.message.content or ""
+        finish_reason = getattr(choice, "finish_reason", None)
+
+        if finish_reason == "length":
+            lines = raw.splitlines()
+            nonempty = [line for line in lines if line.strip()]
+            if len(nonempty) >= 2:
+                dropped = nonempty[-1]
+                raw = "\n".join(nonempty[:-1])
+                print(
+                    f"{label}_truncation_guard:",
+                    {
+                        "finish_reason": "length",
+                        "dropped_last_line": dropped,
+                        "kept_lines": len(nonempty) - 1,
+                    },
+                    flush=True,
+                )
+            else:
+                print(
+                    f"{label}_truncation_guard:",
+                    {
+                        "finish_reason": "length",
+                        "dropped_all": True,
+                    },
+                    flush=True,
+                )
+                raw = ""
+        return raw
+
     def build_prompt(self, user_text: str, context: str, search_result: dict, chat_id: str, speaker: SpeakerProfile):
         episode_block = self.searcher.format_episodes(search_result)
         style_from_episode = self.searcher.format_style(search_result)
@@ -609,10 +647,10 @@ class AgoHashimotoBot:
                             {"role": "user", "content": user},
                         ],
                         temperature=min(self.temperature, 0.65),
-                        max_tokens=self.max_tokens,
+                        max_tokens=max(self.max_tokens, 240),
                     )
                     raw = de_ai_tone(
-                        res.choices[0].message.content or ""
+                        self.completion_text(res, "continuity_groq")
                     )
                     print("continuity_groq_raw:", raw, flush=True)
                     candidates = self.persona_judge.split_candidates(raw)
@@ -911,9 +949,9 @@ class AgoHashimotoBot:
                     {"role": "user", "content": user},
                 ],
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=max(self.max_tokens, 240),
             )
-            raw = res.choices[0].message.content or ""
+            raw = self.completion_text(res, "groq")
             print("groq_raw:", raw, flush=True)
             raw = de_ai_tone(raw)
             candidates = self.persona_judge.split_candidates(raw)

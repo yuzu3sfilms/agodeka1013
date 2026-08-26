@@ -16,6 +16,24 @@ BAD_GENERATED_FRAGMENTS = [
 ]
 
 
+def _looks_cut_midword(text: str) -> bool:
+    """Conservative backup guard for obviously cut generated fragments.
+
+    Avoid rejecting normal casual Japanese without punctuation. Only flag a
+    trailing kanji stem that is very likely the start of a longer verb/noun
+    when the candidate is sentence-like and has no terminal punctuation.
+    """
+    t = (text or "").strip()
+    if not t or re.search(r"[。！？!?…〜～♪♫♡♥☆]$", t):
+        return False
+    if len(t) < 8:
+        return False
+    # A final single kanji immediately following Japanese prose is a common
+    # token-limit truncation shape (e.g. "...見落"). Keep this deliberately
+    # narrow; finish_reason handling in bot.py is the primary guard.
+    return bool(re.search(r"[ぁ-んァ-ヴ一-龥々ー][一-龥]$", t))
+
+
 def _dialogue_act(text: str) -> str:
     t = text or ""
     if re.search(r"^(?:おい|ねえ|ねぇ|なあ|なぁ|ちょっと).*(?:顎|橋本|あらくん)?[！!。]*$", t):
@@ -176,6 +194,9 @@ class PersonaJudge:
 
         if not c:
             return -999, ["empty"]
+
+        if _looks_cut_midword(c):
+            return -999, ["truncated_fragment"]
 
         for bad in BAD_GENERATED_FRAGMENTS:
             if bad in c:

@@ -27,6 +27,7 @@ ELLIPTICAL_QUESTION_RE = re.compile(
 CONTINUATION_RE = re.compile(r"(?:続き|その後|それから|もっと詳しく|他には|ほかには|で？|それで？)", re.I)
 TOPIC_SHIFT_RE = re.compile(r"^(?:ところで|話変わるけど|別の話|関係ないけど|そういえば)", re.I)
 QUESTION_RE = re.compile(r"[？?]|何|なに|誰|だれ|どこ|いつ|なんで|なぜ|どう|どれ|どっち|いくつ|何回|何セット|何キロ")
+MARKED_TOPIC_RE = re.compile(r"^(.{1,32}?)(?:って|について|のこと)(?:は|を|が|どう|何|なに|誰|だれ|どこ|いつ|なんで|なぜ|いる|ある|思う|思って|知って|知る|好き|嫌い|$)")
 GENERIC_TOPICS = {
     "どう", "何", "なに", "誰", "だれ", "どこ", "いつ", "これ", "それ", "あれ",
     "今", "さっき", "話", "質問", "本当", "マジ",
@@ -113,7 +114,29 @@ class DialogueManager:
             return True
         return len(text) <= 18 and bool(QUESTION_RE.search(text))
 
+    def _marked_subject(self, text: str) -> str:
+        """Extract an explicitly marked Japanese topic, independent of topic analyzer.
+
+        Examples of the general grammatical pattern:
+        - Xって...
+        - Xについて...
+        - Xのこと...
+        """
+        stripped = (text or "").strip()
+        match = MARKED_TOPIC_RE.search(stripped)
+        if not match:
+            return ""
+        subject = match.group(1).strip(" 　、,。！？!?")
+        if not subject or subject in GENERIC_TOPICS or len(subject) > 32:
+            return ""
+        return subject
+
     def _explicit_subject(self, text: str) -> str:
+        # Explicit Japanese topic marking outranks analyzer topic guesses.
+        marked = self._marked_subject(text)
+        if marked:
+            return marked
+
         # An omitted predicate question must inherit the previous subject.
         # Example: 「写真ある？」 must not become subject=「写真ある」.
         if NON_SUBJECT_QUESTION_RE.fullmatch((text or "").strip()):
@@ -155,6 +178,19 @@ class DialogueManager:
         last_assistant = self.last(chat_id, "assistant")
         last_user = self.last(chat_id, "user")
         has_history = bool(last_assistant or last_user)
+        explicit_subject = self._explicit_subject(text)
+        current_subject = self._current_subject[chat_id]
+
+        # General rule:
+        # a short question is NOT automatically a follow-up when it explicitly
+        # introduces a different subject. Explicit topic beats recency.
+        explicit_new_subject = bool(
+            explicit_subject
+            and (
+                not current_subject
+                or explicit_subject != current_subject
+            )
+        )
 
         if TOPIC_SHIFT_RE.search(text):
             rel = DialogueRelation("topic_shift", False, False, True, 0.98, "explicit_topic_shift")
@@ -167,8 +203,10 @@ class DialogueManager:
             rel = DialogueRelation("continuation_request", bool(last_assistant), bool(last_user), False, 0.94, "explicit_continuation")
         elif has_history and (FOLLOWUP_RE.search(text) or ELLIPTICAL_QUESTION_RE.fullmatch(text)):
             rel = DialogueRelation("followup", bool(last_assistant), bool(last_user), False, 0.94, "elliptical_followup")
-        elif last_assistant and len(text) <= 24 and QUESTION_RE.search(text):
-            rel = DialogueRelation("followup", True, bool(last_user), False, 0.80, "short_question_after_answer")
+        elif explicit_new_subject:
+            rel = DialogueRelation("new_topic", False, False, False, 0.93, "explicit_new_subject")
+        elif last_assistant and len(text) <= 24 and QUESTION_RE.search(text) and not explicit_subject:
+            rel = DialogueRelation("followup", True, bool(last_user), False, 0.80, "short_elliptical_question_after_answer")
         else:
             rel = DialogueRelation("new_topic", False, False, False, 0.72, "independent_utterance")
 
@@ -176,9 +214,7 @@ class DialogueManager:
             self._topic_stacks[chat_id].clear()
             self._current_subject[chat_id] = ""
 
-        explicit_subject = self._explicit_subject(text)
         follow_up = rel.relation in {"followup", "continuation_request", "repair_request"}
-        current_subject = self._current_subject[chat_id]
 
         # Explicit references and omitted questions inherit the latest subject.
         inherited = bool(follow_up and current_subject and not explicit_subject)
