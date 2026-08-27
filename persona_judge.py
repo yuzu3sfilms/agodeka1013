@@ -216,6 +216,21 @@ SURFACE_CORRUPTION_RE = re.compile(
     r"ありませんる|ますだわ|ですだわ|不明だわ$)"
 )
 
+
+# v14.38 — semantic answer completeness.
+# A candidate may be short, but it must actually answer the current question.
+DANGLING_DEICTIC_RE = re.compile(
+    r"(?:^|[、。！？\s])(?:"
+    r"そうだ|そうです|そう思う|そんな感じ|そういう感じ|そうかも|"
+    r"それかな|それだと思う|ざっくり言えばそう"
+    r")(?:[。！？\s]|$)"
+)
+
+LOW_INFORMATION_OPINION_RE = re.compile(
+    r"^(?:別に)?(?:どうでもいい|よく分からない|わからない|分からない)"
+    r"(?:んだけど|けど|かな|ね|よ)?[。！？]?$"
+)
+
 ABSTRACT_EVALUATION_RE = re.compile(
     r"(?:多様|創造力|欠点|存在だ|存在で|豊かだ|豊かで|社会|文明|"
     r"本質|普遍|複雑な存在|興味深い|未知だ|可能性を秘め|"
@@ -1288,6 +1303,20 @@ class PersonaJudge:
 
     def score(self, candidate: str, user_text: str, search_result: dict):
         c = (candidate or "").strip()
+        # v14.38: semantic completeness before style/persona scoring.
+        qsem = (behavior or {}).get("question_semantics", {}) if isinstance(behavior, dict) else {}
+        required_semantics = qsem.get("required", "")
+
+        # Reject answers whose final claim depends on a missing antecedent.
+        if DANGLING_DEICTIC_RE.search(c):
+            return -999, ["semantic_incomplete:dangling_deictic"]
+
+        # For explicit opinion questions, "I don't know / don't care" is allowed only
+        # when it is itself the complete answer, not when followed by an empty "そうだ".
+        if required_semantics == "personal_evaluation":
+            if "ざっくり言えばそう" in c or re.search(r"(?:だけど|けど)[、 ]*そうだ[。！？]?$", c):
+                return -999, ["semantic_incomplete:opinion_missing_evaluation"]
+
         if SURFACE_CORRUPTION_RE.search(c):
             return -999, ["surface_corruption_hard_reject"]
         nc = normalize(c)
@@ -1353,7 +1382,7 @@ class PersonaJudge:
                     score -= 75
                     reasons.append("opinion_evidence_missing:strong_claim")
                 if LOW_COMMITMENT_OPINION_RE.search(c):
-                    score += 28
+                    score += 4
                     reasons.append("opinion_evidence_fit:low_commitment")
             elif evidence_level == "direct":
                 direction = opinion_evidence.get("direction", "")

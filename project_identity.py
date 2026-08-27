@@ -2,7 +2,7 @@
 
 PROJECT_NAME = "Project AGO"
 PROJECT_EXPANSION = "Alternative Generated Organism"
-PROJECT_VERSION = "v14.37"
+PROJECT_VERSION = "v14.38"
 PROJECT_INSTANCE = "AGO-HASHIMOTO"
 PROJECT_SLUG = "project-ago"
 
