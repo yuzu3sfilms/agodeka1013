@@ -1272,6 +1272,13 @@ class PersonaJudge:
                 continue
             line = re.sub(r"^[\-\*\d\.\)、\)]\s*", "", line).strip()
             line = re.sub(r"^候補[A-Da-d0-9]*[:：]\s*", "", line).strip()
+            # Models occasionally wrap a candidate in Japanese quotes or emit
+            # only one side of the quote. LINE replies should never preserve
+            # that formatting artifact.
+            if len(line) >= 2 and line[0] in "「『“\"" and line[-1] in "」』”\"":
+                line = line[1:-1].strip()
+            else:
+                line = line.lstrip("「『“\"").rstrip("」』”\"").strip()
             if line:
                 lines.append(line)
         if not lines:
@@ -1429,11 +1436,16 @@ class PersonaJudge:
             if relationship_evidence.get("used"):
                 interaction_count = int(relationship_evidence.get("interaction_count", 0) or 0)
                 if interaction_count >= 8:
-                    if re.fullmatch(r"(?:まあ|まぁ)?[、 ]*(?:まあかな|微妙(?:な感じ)?|別に|分からない|なんとも(?:言えない)?)[。！？!?]*", c):
-                        score -= 28
+                    generic_relation_evasion = bool(re.search(
+                        r"(?:^|[、。 ]+)(?:まあ|まぁ)?[、 ]*(?:まあかな|微妙(?:だ|かな|な感じ)?|別に(?:悪くない|どうでもいい)?|分からない|なんとも(?:言えない)?)(?:と思ってる|と思う)?[。！？!?]*$",
+                        c,
+                    ))
+                    signals = relationship_evidence.get("signals") or []
+                    if generic_relation_evasion:
+                        score -= 58 if signals else 36
                         reasons.append("relationship_evidence_underused:generic_evasion")
                     else:
-                        score += 8
+                        score += 12 if signals else 8
                         reasons.append("relationship_evidence_available")
 
         if (

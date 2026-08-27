@@ -15,13 +15,32 @@ HASHIMOTO_NAMES = {
 STATIC_ALIASES = {
     "Reiji Shioda": {"Reiji Shioda", "塩田", "れーじ", "レージ"},
     "Ryo Sekiguchi": {"Ryo Sekiguchi", "関口", "せきぐち"},
-    "中山 貴文": {"中山 貴文", "中山", "貴文"},
+    "中山 貴文": {"中山 貴文", "中山", "貴文", "ぽつぉ", "ぽつお", "ポツォ", "ポッツォ", "ぽつ"},
     "村田": {"村田", "ムタ"},
     "坂口": {"坂口"},
 }
 
 DISCOURSE_PREFIX_RE = re.compile(r"^(?:じゃあ|じゃ|なら|では|で、|えっと|まあ|まぁ)\s*")
 SUBJECT_TAIL_RE = re.compile(r"(?:のこと|について|って|は|を|が)?\s*(?:どう思(?:ってる|う)|どう感じる|好き|嫌い).*$")
+
+MEDIA_RE = re.compile(r"^\[(?:写真|スタンプ|動画|ファイル|アルバム)\]$|https?://", re.I)
+SIGNAL_PATTERNS = {
+    "short_reaction": re.compile(r"^.{1,12}$"),
+    "questioning": re.compile(r"[？?]|(?:何|どこ|いつ|誰|どう|なんで|なぜ)"),
+    "laughter": re.compile(r"草|笑|ｗ|w{2,}|ワロ|くさ", re.I),
+    "planning": re.compile(r"(?:今日|明日|今度|何時|集合|行く|行こ|やる|しよう|大丈夫|会う|食べ|飲み)"),
+    "agreement": re.compile(r"^(?:そう|それな|たしかに|確かに|いいよ|大丈夫|はい|うん|おけ|OK)", re.I),
+    "strong_banter": re.compile(r"(?:クソ|雑魚|ハゲ|デブ|ホモ|うんこ|キモ|きも|バカ|アホ|煽)"),
+}
+
+SIGNAL_LABELS = {
+    "short_reaction": "短い即応が多い",
+    "questioning": "質問・返しが多い",
+    "laughter": "笑い反応が出る",
+    "planning": "予定・行動の相談がある",
+    "agreement": "同意・了承の応答がある",
+    "strong_banter": "強めの冗談・いじり語が出る",
+}
 
 
 class RelationshipEvidenceIndex:
@@ -158,19 +177,69 @@ class RelationshipEvidenceIndex:
                 "target": "",
                 "interaction_count": 0,
                 "examples": [],
+                "signals": [],
                 "action_policy": [],
                 "reason": "no_person_target",
             }
 
         exchanges = self._exchange_cache.get(target, [])
-        # Prefer concise, text-bearing exchanges; sample across the corpus rather
-        # than taking only the first/last cluster.
-        viable = [x for x in exchanges if x["partner_text"] and x["hashimoto_text"]]
-        if len(viable) > max_examples:
-            step = max(1, len(viable) // max_examples)
-            picked = viable[::step][:max_examples]
-        else:
-            picked = viable[:max_examples]
+        viable = [
+            x for x in exchanges
+            if x["partner_text"] and x["hashimoto_text"]
+            and not MEDIA_RE.search(x["partner_text"])
+            and not MEDIA_RE.search(x["hashimoto_text"])
+        ]
+
+        # Build an observable relationship signature from Hashimoto's actual
+        # adjacent utterances. These are behavior signals, not inferred feelings.
+        signal_counts = Counter()
+        scored_examples = []
+        for idx, x in enumerate(viable):
+            ht = x["hashimoto_text"]
+            local = []
+            for key, pat in SIGNAL_PATTERNS.items():
+                if pat.search(ht):
+                    signal_counts[key] += 1
+                    local.append(key)
+            # Prefer exchanges that reveal interaction style and keep samples
+            # spread across the corpus instead of simply taking recent lines.
+            relational_score = (
+                3 * ("strong_banter" in local)
+                + 2 * ("laughter" in local)
+                + 2 * ("planning" in local)
+                + 1 * ("questioning" in local)
+                + 1 * ("agreement" in local)
+                + 1 * ("short_reaction" in local)
+            )
+            if 2 <= len(ht) <= 70 and 2 <= len(x["partner_text"]) <= 90:
+                relational_score += 1
+            scored_examples.append((relational_score, idx, x))
+
+        scored_examples.sort(key=lambda t: (t[0], -t[1]), reverse=True)
+        picked = []
+        seen_pairs = set()
+        for _score, _idx, x in scored_examples:
+            key = (x["partner_text"], x["hashimoto_text"])
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            picked.append(x)
+            if len(picked) >= max_examples:
+                break
+
+        total = max(1, len(viable))
+        ranked_signals = []
+        for key, count in signal_counts.most_common():
+            if count < 2:
+                continue
+            ranked_signals.append({
+                "signal": key,
+                "label": SIGNAL_LABELS[key],
+                "count": int(count),
+                "rate": round(count / total, 3),
+            })
+            if len(ranked_signals) >= 5:
+                break
 
         policy_node = (relationship_policy or {}).get(target, {}) or {}
         actions = policy_node.get("action_policy", {}) or {}
@@ -184,6 +253,7 @@ class RelationshipEvidenceIndex:
             "target": target,
             "interaction_count": int(self._interaction_counts.get(target, 0)),
             "examples": picked,
+            "signals": ranked_signals,
             "action_policy": [
                 {"action": a, "count": c, "probability": round(p, 3)}
                 for a, c, p in ranked_actions if c > 0
@@ -200,6 +270,11 @@ class RelationshipEvidenceIndex:
             f"対象人物: {ev.get('target','')}",
             f"隣接会話数: {ev.get('interaction_count',0)}",
         ]
+        signals = ev.get("signals") or []
+        if signals:
+            lines.append("観測できる関係シグナル: " + ", ".join(
+                f"{x['label']}({x['count']})" for x in signals
+            ))
         actions = ev.get("action_policy") or []
         if actions:
             lines.append("この相手への実測行動傾向: " + ", ".join(
@@ -213,5 +288,5 @@ class RelationshipEvidenceIndex:
                     lines.append(f"- {ev.get('target')}: {x['partner_text']} → 橋本新: {x['hashimoto_text']}")
                 else:
                     lines.append(f"- 橋本新: {x['hashimoto_text']} → {ev.get('target')}: {x['partner_text']}")
-        lines.append("注意: 会話量・口調・反応様式の根拠であり、好き嫌い等の未記録な内面を断定する根拠ではない。")
+        lines.append("注意: 会話量・口調・反応様式の根拠であり、好き嫌い等の未記録な内面を断定する根拠ではない。人物評価を答える時は、無難な「微妙」「別に」だけで逃げず、この観測シグナルのどれかを内容に反映する。")
         return "\n".join(lines)
