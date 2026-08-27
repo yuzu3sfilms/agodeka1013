@@ -14,10 +14,10 @@ HASHIMOTO_NAMES = {
 # Only identity aliases, never personality/value assertions.
 STATIC_ALIASES = {
     "Reiji Shioda": {"Reiji Shioda", "塩田", "れーじ", "レージ"},
-    "Ryo Sekiguchi": {"Ryo Sekiguchi", "関口", "せきぐち"},
-    "中山 貴文": {"中山 貴文", "中山", "貴文", "ぽつぉ", "ぽつお", "ポツォ", "ポッツォ", "ぽつ"},
-    "村田": {"村田", "ムタ"},
-    "坂口": {"坂口"},
+    "Ryo Sekiguchi": {"Ryo Sekiguchi", "関口", "関口さん", "せきぐち", "せっきー", "セッキー", "せっき", "セッキ"},
+    "中山 貴文": {"中山 貴文", "中山", "中山さん", "貴文", "ぽつぉ", "ぽつお", "ポツォ", "ポッツォ", "ぽつ", "ぽっつぉ"},
+    "村田": {"村田", "村田さん", "ムタ", "むた"},
+    "坂口": {"坂口", "坂口さん", "さかぐち"},
 }
 
 DISCOURSE_PREFIX_RE = re.compile(r"^(?:じゃあ|じゃ|なら|では|で、|えっと|まあ|まぁ)\s*")
@@ -148,6 +148,19 @@ class RelationshipEvidenceIndex:
                 "hashimoto_text": h["text"],
                 "source": h["source"],
             })
+
+    def resolve_alias(self, text):
+        """Resolve a person alias without inferring any relationship semantics."""
+        raw = (text or "").strip(" \t\r\n、。！？?『』「」")
+        raw = re.sub(r"(?:さん|くん|君|ちゃん)$", "", raw).strip() or raw
+        if raw in {"俺", "おれ", "僕", "ぼく", "私", "わたし", "自分"}:
+            return "USER_SELF"
+        aliases = sorted(self.alias_to_name, key=len, reverse=True)
+        for alias in aliases:
+            a = re.sub(r"(?:さん|くん|君|ちゃん)$", "", alias).strip()
+            if raw == alias or raw == a:
+                return self.alias_to_name[alias]
+        return None
 
     def resolve_target(self, user_text, behavior, current_speaker=None):
         behavior = behavior or {}

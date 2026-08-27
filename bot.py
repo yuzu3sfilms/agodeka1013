@@ -107,6 +107,11 @@ class AgoHashimotoBot:
         self.last_reply_at = defaultdict(float)
         self.last_topic_terms = defaultdict(list)
         self.behavior_modes = defaultdict(lambda: "ordinary_direct")
+        # v14.44: narrowly scoped conversation mode for chained person-opinion questions.
+        # This is deliberately separate from the general topic stack so that
+        # 「村田は？」「せっきー」 can inherit "どう思ってる？" without making
+        # unrelated ellipsis inherit arbitrary old predicates.
+        self.person_opinion_chain = defaultdict(bool)
         self.seen_chats = set()
         self.shutdown_store = ShutdownStateStore()
 
@@ -179,6 +184,47 @@ class AgoHashimotoBot:
         if self.current_state.stopped(t):
             return False, "explicit_stop"
         return True, "first_substantive_message"
+
+    def _explicit_person_opinion_question(self, text: str) -> bool:
+        t = (text or "").strip()
+        return bool(re.search(r"(?:のこと|について|って)?\s*(?:どう思(?:ってる|う)|どう感じる|好き(?:なの)?|嫌い(?:なの)?)", t))
+
+    def _short_person_subject(self, text: str):
+        """Return a raw person token only for genuinely short person-only follow-ups."""
+        t = (text or "").strip()
+        if not t or len(t) > 24:
+            return None
+        # Remove only discourse/relationship-question particles, never arbitrary words.
+        t = re.sub(r"^(?:じゃあ|じゃ|なら|で、|で)?\s*", "", t)
+        t = re.sub(r"[？?。！!]+$", "", t).strip()
+        t = re.sub(r"(?:のこと)?(?:は|って)$", "", t).strip()
+        if not t or re.search(r"(?:何|なに|どう|なんで|なぜ|いつ|どこ|誰|だれ|これ|それ|あれ)$", t):
+            return None
+        resolved = self.relationship_evidence.resolve_alias(t)
+        return t if resolved else None
+
+    def _semantic_user_text(self, chat_id: str, user_text: str):
+        """Expand only chained person-opinion ellipsis; preserve the visible user text."""
+        t = (user_text or "").strip()
+        explicit = self._explicit_person_opinion_question(t)
+        if explicit:
+            self.person_opinion_chain[chat_id] = True
+            return t, {"expanded": False, "reason": "explicit_person_opinion"}
+
+        subject = self._short_person_subject(t)
+        if self.person_opinion_chain[chat_id] and subject:
+            expanded = f"{subject}のことどう思ってる？"
+            return expanded, {
+                "expanded": True,
+                "reason": "person_opinion_chain",
+                "original": t,
+                "expanded_text": expanded,
+            }
+
+        # A normal substantive turn ends this narrow inheritance mode.
+        if t and not re.fullmatch(r"(?:うん|はい|へえ|ほう|なるほど|草|笑|ｗ+|w+)", t, re.I):
+            self.person_opinion_chain[chat_id] = False
+        return t, {"expanded": False, "reason": "no_person_opinion_inheritance"}
 
     def remember_user(self, chat_id: str, text: str):
         self.histories[chat_id].append(text)
@@ -742,7 +788,9 @@ Opinion Evidence:
             flush=True,
         )
 
-        dialogue_relation = self.dialogue.classify(chat_id, user_text)
+        semantic_user_text, semantic_resolution = self._semantic_user_text(chat_id, user_text)
+        print("semantic_resolution:", semantic_resolution, flush=True)
+        dialogue_relation = self.dialogue.classify(chat_id, semantic_user_text)
         print("dialogue_relation:", dialogue_relation, flush=True)
 
         if self.is_shutdown(chat_id):
@@ -814,7 +862,7 @@ Opinion Evidence:
             if self.groq_available():
                 try:
                     system, user = self.continuity_prompt(
-                        user_text,
+                        semantic_user_text,
                         chat_id,
                         dialogue_relation,
                         speaker,
@@ -836,7 +884,7 @@ Opinion Evidence:
                     cleaned = []
                     for cand in candidates:
                         cand = self.remove_unverified_vocative(
-                            clean_reply(user_text, cand),
+                            clean_reply(semantic_user_text, cand),
                             speaker,
                         )
                         cand = _repair_surface_corruption(cand)
@@ -844,7 +892,7 @@ Opinion Evidence:
                             cleaned.append(cand)
                     chosen, judge_info = self.persona_judge.choose(
                         cleaned,
-                        user_text,
+                        semantic_user_text,
                         {
                             "episodes": [],
                             "topic_terms": [],
@@ -856,10 +904,10 @@ Opinion Evidence:
                             "generation_mode": True,
                             "current_speaker": speaker.canonical_name,
                             "hashimoto_behavior": self.persona_judge.infer_behavior_state(
-                                user_text=user_text,
+                                user_text=semantic_user_text,
                                 context=self.dialogue.context(
                                     chat_id,
-                                    current_user_text=user_text,
+                                    current_user_text=semantic_user_text,
                                     limit=8,
                                 ),
                                 search_result={},
@@ -896,24 +944,24 @@ Opinion Evidence:
             )
             return self.finish(chat_id, user_text, answer)
 
-        raw_result = self.searcher.search(user_text)
+        raw_result = self.searcher.search(semantic_user_text)
         result = self.ranker.rerank(
-            user_text,
+            semantic_user_text,
             raw_result,
             max_selected=2,
         )
         result["inherited_topic"] = False
 
         state = self.current_state.classify(
-            user_text=user_text,
+            user_text=semantic_user_text,
             history=list(self.histories[chat_id]),
             last_topic_terms=self.last_topic_terms[chat_id],
             search_result=result,
             is_first_message=is_first_message,
         )
         behavior_state = self.persona_judge.infer_behavior_state(
-            user_text=user_text,
-            context=context,
+            user_text=semantic_user_text,
+            context=self.dialogue.context(chat_id, current_user_text=semantic_user_text, limit=8),
             search_result=result,
             relation=dialogue_relation,
             previous_mode=self.behavior_modes[chat_id],
@@ -934,13 +982,16 @@ Opinion Evidence:
         result["hashimoto_question_semantics"] = behavior_state.get("question_semantics", {})
         result["hashimoto_opinion_evidence"] = behavior_state.get("opinion_evidence", {})
         relationship_evidence = self.relationship_evidence.evidence(
-            user_text=user_text,
+            user_text=semantic_user_text,
             behavior=behavior_state,
             current_speaker=speaker.canonical_name,
             relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
         )
         result["relationship_evidence"] = relationship_evidence
         state["relationship_evidence"] = relationship_evidence
+        result["semantic_user_text"] = semantic_user_text
+        state["semantic_user_text"] = semantic_user_text
+        state["semantic_resolution"] = semantic_resolution
 
         called = state.get("called", False)
         question = state.get("question", False)
@@ -1184,7 +1235,7 @@ Opinion Evidence:
         try:
             if no_relevant_episode:
                 system, user = self.fallback_prompt(
-                    user_text,
+                    semantic_user_text,
                     context,
                     chat_id,
                     question,
@@ -1192,7 +1243,7 @@ Opinion Evidence:
                 )
             else:
                 system, user = self.build_prompt(
-                    user_text,
+                    semantic_user_text,
                     context,
                     result,
                     chat_id,
@@ -1217,7 +1268,7 @@ Opinion Evidence:
 
             cleaned_candidates = []
             for cand in candidates:
-                cand_clean = clean_reply(user_text, cand)
+                cand_clean = clean_reply(semantic_user_text, cand)
                 cand_clean = self.remove_unverified_vocative(
                     cand_clean,
                     speaker,
@@ -1228,8 +1279,8 @@ Opinion Evidence:
 
             judge_result = dict(result)
             judge_result["generation_grounding_text"] = "\n".join([
-                user_text or "",
-                context or "",
+                semantic_user_text or "",
+                self.dialogue.context(chat_id, current_user_text=semantic_user_text, limit=8) or "",
             ]).strip()
             judge_result["generation_mode"] = True
             judge_result["current_speaker"] = speaker.canonical_name
@@ -1261,7 +1312,7 @@ Opinion Evidence:
 
             chosen, judge_info = self.persona_judge.choose(
                 cleaned_candidates,
-                user_text,
+                semantic_user_text,
                 judge_result,
             )
             print("persona_judge:", judge_info, flush=True)
@@ -1296,14 +1347,14 @@ Opinion Evidence:
                 print("groq_retry_raw:", retry_raw, flush=True)
                 retry_candidates = []
                 for cand in self.persona_judge.split_candidates(retry_raw):
-                    cand_clean = clean_reply(user_text, cand)
+                    cand_clean = clean_reply(semantic_user_text, cand)
                     cand_clean = self.remove_unverified_vocative(cand_clean, speaker)
                     cand_clean = _repair_surface_corruption(cand_clean)
                     if cand_clean:
                         retry_candidates.append(cand_clean)
                 print("persona_retry_candidates:", retry_candidates, flush=True)
                 retry_chosen, retry_judge_info = self.persona_judge.choose(
-                    retry_candidates, user_text, judge_result
+                    retry_candidates, semantic_user_text, judge_result
                 )
                 print("persona_retry_judge:", retry_judge_info, flush=True)
                 if retry_chosen:
