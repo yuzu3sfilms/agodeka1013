@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 
 from utils import normalize
+from persona_policy import PersonaPolicy
+from behavior_taxonomy import classify_reply, classify_stimulus
 
 
 ASSERTION_WORDS = [
@@ -170,6 +172,113 @@ class PersonaJudge:
             x.get("text", "")
             for x in self.profile.get("common_lines", [])[:120]
         ]
+        self.persona_policy = PersonaPolicy(data_dir)
+
+    def generation_guidance(
+        self,
+        user_text: str,
+        current_speaker: str | None = None,
+    ) -> str:
+        """Build generation guidance directly from corpus-derived policy."""
+        policy = getattr(self.persona_policy, "profile", {}) or {}
+        if not policy:
+            return ""
+
+        situation = classify_stimulus(user_text or "")
+        global_actions = policy.get("global_action_policy", {}) or {}
+        situation_node = (
+            policy.get("situation_policy", {}).get(situation, {}) or {}
+        )
+        situation_actions = situation_node.get("actions", {}) or {}
+        relationship = (
+            policy.get("relationship_policy", {}).get(
+                current_speaker or "",
+                {},
+            ) or {}
+        )
+        relationship_actions = relationship.get("action_policy", {}) or {}
+
+        def top_actions(node, n=3):
+            ranked = sorted(
+                (
+                    (
+                        action,
+                        float(item.get("probability", 0.0)),
+                        int(item.get("count", 0)),
+                    )
+                    for action, item in node.items()
+                    if int(item.get("count", 0)) > 0
+                ),
+                key=lambda x: (x[1], x[2]),
+                reverse=True,
+            )
+            return ranked[:n]
+
+        situ = top_actions(situation_actions)
+        rel = top_actions(relationship_actions)
+        glob = top_actions(global_actions)
+
+        language = policy.get("language", {}) or {}
+        global_avg = float(
+            language.get("average_reply_length", self.median_len)
+        )
+        partner_avg = relationship.get("average_reply_length")
+        if partner_avg is not None:
+            target_length = float(partner_avg)
+            length_source = "相手別"
+        else:
+            target_length = global_avg
+            length_source = "全体"
+
+        def fmt(items):
+            return ", ".join(
+                f"{action}:{prob:.0%}"
+                for action, prob, _ in items
+            )
+
+        pieces = [
+            f"実ログ行動傾向({situation}): {fmt(situ) or fmt(glob)}",
+            f"平均返答長({length_source}): 約{target_length:.1f}文字",
+        ]
+        if rel:
+            pieces.append(f"この相手への傾向: {fmt(rel)}")
+
+        return (
+            "以下は過去ログから集計した行動傾向。"
+            "文言はコピーせず、返答の長さ・反応タイプ・雑さの目安にする。"
+            + " / ".join(pieces)
+        )
+
+    def _corpus_style_prior(
+        self,
+        candidate: str,
+        user_text: str,
+        search_result: dict,
+    ) -> tuple[int, list[str]]:
+        """Use corpus action distributions as a soft persona prior."""
+        policy = getattr(self, "persona_policy", None)
+        if policy is None or not policy.loaded:
+            return 0, []
+
+        action = classify_reply(candidate)
+        situation = classify_stimulus(user_text)
+        current_speaker = search_result.get("current_speaker") or None
+
+        bonus, reasons = policy.action_bonus(
+            action,
+            current_speaker=current_speaker,
+            situation=situation,
+        )
+        weighted = int(round(bonus * 1.7))
+        if weighted:
+            reasons = [
+                reason.replace(":+", ":base+")
+                for reason in reasons
+            ]
+            reasons.append(
+                f"corpus_style_prior:{action}:{situation}:+{weighted}"
+            )
+        return weighted, reasons
 
     def _load_json(self, path: Path, default):
         try:
@@ -412,7 +521,8 @@ class PersonaJudge:
             reasons.append("tense_invention")
 
         if re.search(
-            r"(かなと思|と思う|でしょう|しましょう|してください)",
+            r"(かと思います|でしょう|しましょう|してください|"
+            r"と考えられます|可能性があります)",
             c,
         ):
             score -= 40
@@ -421,6 +531,14 @@ class PersonaJudge:
         if c in self.common_lines:
             score += 12
             reasons.append("known_line")
+
+        style_bonus, style_reasons = self._corpus_style_prior(
+            c,
+            user_text,
+            search_result,
+        )
+        score += style_bonus
+        reasons.extend(style_reasons)
 
         return score, reasons
 
@@ -467,5 +585,6 @@ class PersonaJudge:
                 "persona",
                 "episode",
                 "provenance",
+                "corpus_style",
             ],
         }

@@ -168,6 +168,10 @@ class AgoHashimotoBot:
 
     def continuity_prompt(self, user_text: str, chat_id: str, relation: dict, speaker: SpeakerProfile):
         history = self.dialogue.context(chat_id, current_user_text=user_text, limit=8)
+        persona_guidance = self.persona_judge.generation_guidance(
+            user_text,
+            speaker.canonical_name,
+        )
         system = (
             "橋本新本人風のAIアカウントとして、直前の会話につながる返答をする。"
             "現在の発言を単独の検索語として扱わず、直前のassistant発言とuser発言を最優先する。"
@@ -185,6 +189,9 @@ class AgoHashimotoBot:
 
 相手情報:
 {speaker.prompt_block()}
+
+過去ログ統計:
+{persona_guidance}
 
 直前の流れに自然につながる返答候補を4つ。
 候補1: ...
@@ -371,6 +378,10 @@ class AgoHashimotoBot:
 
     def fallback_prompt(self, user_text: str, context: str, chat_id: str, question: bool, speaker: SpeakerProfile):
         relation_style = "\n".join(self.relationships.style_samples(n=4))
+        persona_guidance = self.persona_judge.generation_guidance(
+            user_text,
+            speaker.canonical_name,
+        )
         system = (
             "橋本新本人風のAIアカウントとしてLINEで短く返す。"
             "グループ内では「あらくん」「橋本」「顎」「AGODEKA」と呼ばれる同一人物。"
@@ -385,6 +396,9 @@ class AgoHashimotoBot:
 直近:{context}
 相手情報:
 {speaker.prompt_block()}
+
+過去ログ統計:
+{persona_guidance}
 
 口調サンプル:
 {relation_style}
@@ -491,6 +505,10 @@ class AgoHashimotoBot:
         reasons = str(search_result.get("relevance_reasons", []))[:300]
         recent = "\n".join(context.splitlines()[-2:])
         question = self.is_question(user_text)
+        persona_guidance = self.persona_judge.generation_guidance(
+            user_text,
+            speaker.canonical_name,
+        )
         system = (
             "あなたは橋本新本人風のAIアカウント。ただしこれは最後の保険生成。過去ログ実返答が使えない時だけ使われる。"
             "グループ内では「あらくん」「橋本」「顎」「AGODEKA」と呼ばれる同一人物として返す。"
@@ -520,6 +538,9 @@ class AgoHashimotoBot:
 関連度:{rel}
 採用理由:{reasons}
 直近:{recent}
+
+過去ログ統計:
+{persona_guidance}
 
 過去ログ:
 {episode_block}
@@ -699,6 +720,7 @@ class AgoHashimotoBot:
                                 limit=8,
                             ),
                             "generation_mode": True,
+                            "current_speaker": speaker.canonical_name,
                         },
                     )
                     print(
@@ -1021,6 +1043,7 @@ class AgoHashimotoBot:
                 context or "",
             ]).strip()
             judge_result["generation_mode"] = True
+            judge_result["current_speaker"] = speaker.canonical_name
 
             chosen, judge_info = self.persona_judge.choose(
                 cleaned_candidates,
