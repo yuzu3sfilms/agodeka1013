@@ -64,7 +64,8 @@ def _candidate_act_matches(candidate: str, user_text: str) -> bool:
         return bool(re.search(r"から|ので|せい|ため|わから|分から|知らな", c))
     if act == "question":
         return bool(re.search(
-            r"はい|うん|そう|ある|ない|いる|いない|強|弱|増|減|変わ|"
+            r"はい|うん|そう|ある|ない|いる|いない|いそう|ありそう|"
+            r"思う|思わ|かも|強|弱|増|減|変わ|"
             r"わから|分から|知らな|たぶん|多分|まだ|もう",
             c,
         ))
@@ -141,6 +142,28 @@ def _episode_only_tokens(candidate: str, user_text: str, search_result: dict):
         if nt in episode_n and token not in out:
             out.append(token)
     return out
+
+
+WH_QUESTION_RE = re.compile(
+    r"何|なに|誰|だれ|どこ|いつ|どれ|どっち|どの|"
+    r"なんで|なぜ|何故|どうして|いくつ|何回|何人|何個"
+)
+
+DIRECT_ANSWER_PREDICATE_RE = re.compile(
+    r"(?:いる|いない|ある|ない|思う|思って|好き|嫌い|"
+    r"なった|変わった|増えた|減った|良くなった|悪くなった)"
+)
+
+
+def _requires_direct_answer_gate(user_text: str) -> bool:
+    text = (user_text or "").strip()
+    if not re.search(r"[？?]", text):
+        return False
+    if WH_QUESTION_RE.search(text):
+        if re.search(r"どう思う", text):
+            return True
+        return False
+    return bool(DIRECT_ANSWER_PREDICATE_RE.search(text))
 
 
 class PersonaJudge:
@@ -375,6 +398,12 @@ class PersonaJudge:
 
         if not c:
             return -999, ["empty"]
+
+        if (
+            _requires_direct_answer_gate(user_text)
+            and not _candidate_act_matches(c, user_text)
+        ):
+            return -999, ["dialogue_act_hard_reject"]
 
         if _looks_cut_midword(c):
             return -999, ["truncated_fragment"]
