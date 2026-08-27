@@ -38,6 +38,7 @@ from collections import defaultdict, deque
 from openai import OpenAI
 from dynamic_search import DynamicSearch
 from relationship import RelationshipProfile
+from relationship_evidence import RelationshipEvidenceIndex
 from relevance import RelevanceRanker
 from style_guard import guard_reply
 from canon_answer import CanonAnswer
@@ -85,6 +86,7 @@ class AgoHashimotoBot:
         )
         self.searcher = DynamicSearch()
         self.relationships = RelationshipProfile()
+        self.relationship_evidence = RelationshipEvidenceIndex()
         self.ranker = RelevanceRanker()
         self.canon_answer = CanonAnswer()
         self.persona_judge = PersonaJudge()
@@ -213,6 +215,13 @@ class AgoHashimotoBot:
             speaker.canonical_name,
             behavior,
         )
+        relationship_evidence = self.relationship_evidence.evidence(
+            user_text=user_text,
+            behavior=behavior,
+            current_speaker=speaker.canonical_name,
+            relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
+        )
+        relationship_evidence_block = self.relationship_evidence.format(relationship_evidence)
         system = (
             "橋本新本人風のAIアカウントとして、直前の会話につながる返答をする。"
             "現在の発言を単独の検索語として扱わず、直前のassistant発言とuser発言を最優先する。"
@@ -440,6 +449,13 @@ class AgoHashimotoBot:
             speaker.canonical_name,
             behavior,
         )
+        relationship_evidence = self.relationship_evidence.evidence(
+            user_text=user_text,
+            behavior=behavior,
+            current_speaker=speaker.canonical_name,
+            relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
+        )
+        relationship_evidence_block = self.relationship_evidence.format(relationship_evidence)
         system = (
             "橋本新本人風のAIアカウントとしてLINEで返す。"
             "グループ内では「あらくん」「橋本」「顎」「AGODEKA」と呼ばれる同一人物。"
@@ -448,6 +464,9 @@ class AgoHashimotoBot:
             "短さや語尾を人格の代用品にしない。"
             "現在の橋本行動状態に従い、確認が必要なら聞き、説明状態なら長くなってよく、"
             "普通の会話では普通に答える。丁寧語も必要なら自然に使う。"
+            "人物への意見質問では人物関係資料を優先し、実際の会話量・距離感・反応様式を使う。"
+            "人物関係資料があっても、記録にない好き嫌い・内面評価は作らない。"
+            "関係資料が十分ある相手に、根拠なく『分からない』『別に』だけで逃げない。"
         )
         user = f"""mode:{'Q' if question else 'continue'}
 発言:{user_text}
@@ -457,6 +476,9 @@ class AgoHashimotoBot:
 
 過去ログ統計:
 {persona_guidance}
+
+人物関係資料:
+{relationship_evidence_block}
 
 口調サンプル:
 {relation_style}
@@ -575,6 +597,13 @@ class AgoHashimotoBot:
             speaker.canonical_name,
             behavior,
         )
+        relationship_evidence = search_result.get("relationship_evidence") or self.relationship_evidence.evidence(
+            user_text=user_text,
+            behavior=behavior,
+            current_speaker=speaker.canonical_name,
+            relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
+        )
+        relationship_evidence_block = self.relationship_evidence.format(relationship_evidence)
         system = (
             "あなたは橋本新本人風のAIアカウント。ただしこれは最後の保険生成。過去ログ実返答が使えない時だけ使われる。"
             "グループ内では「あらくん」「橋本」「顎」「AGODEKA」と呼ばれる同一人物として返す。"
@@ -595,6 +624,8 @@ class AgoHashimotoBot:
             "現在のStanceがpersonal_evaluationなら、抽象論ではなく本人の評価・感想として答える。"
             "Opinion Evidenceがnoneなら、対象への強い好き嫌い・怖さ・面白さを橋本の新しい価値観として捏造しない。別に、分からない、なんとも等の低コミットメントを優先する。"
             "Opinion Evidenceがdirectなら、その方向と過去発言の範囲を守る。"
+            "人物への評価質問では人物関係資料を使う。対象人物との実際の隣接会話・行動傾向から距離感と反応様式を再現する。"
+            "人物関係資料は好き嫌いを自動推定する許可ではない。記録にない内面評価は捏造しない。"
             "価値判断は多様性・創造力・人間性などのLLM的な総論へ逃げず、具体的に返す。"
             "次に現在の橋本行動状態に合わせ、最後に口調統計を表現調整として使う。"
             "生成後に敬語や語尾を機械的に橋本風へ置換しない。文法的に自然な原文を優先する。"
@@ -639,6 +670,9 @@ Question Semantics:
 
 Opinion Evidence:
 {behavior.get("opinion_evidence", {})}
+
+人物関係資料:
+{relationship_evidence_block}
 
 過去ログ:
 {episode_block}
@@ -897,6 +931,14 @@ Opinion Evidence:
         result["hashimoto_value_orientation"] = behavior_state.get("value_orientation", {})
         result["hashimoto_question_semantics"] = behavior_state.get("question_semantics", {})
         result["hashimoto_opinion_evidence"] = behavior_state.get("opinion_evidence", {})
+        relationship_evidence = self.relationship_evidence.evidence(
+            user_text=user_text,
+            behavior=behavior_state,
+            current_speaker=speaker.canonical_name,
+            relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
+        )
+        result["relationship_evidence"] = relationship_evidence
+        state["relationship_evidence"] = relationship_evidence
 
         called = state.get("called", False)
         question = state.get("question", False)
@@ -920,6 +962,7 @@ Opinion Evidence:
             behavior_state.get("opinion_evidence", {}),
             flush=True,
         )
+        print("relationship_evidence:", relationship_evidence, flush=True)
         print(
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
@@ -1212,6 +1255,7 @@ Opinion Evidence:
                 "hashimoto_opinion_evidence",
                 judge_result["hashimoto_behavior"].get("opinion_evidence", {}),
             )
+            judge_result["relationship_evidence"] = result.get("relationship_evidence", {})
 
             chosen, judge_info = self.persona_judge.choose(
                 cleaned_candidates,
@@ -1219,6 +1263,48 @@ Opinion Evidence:
                 judge_result,
             )
             print("persona_judge:", judge_info, flush=True)
+
+            retry_needed, retry_reasons = self.persona_judge.should_regenerate(
+                chosen, judge_info, judge_result
+            )
+            if retry_needed:
+                print("persona_regeneration:", {"retry": True, "reasons": retry_reasons}, flush=True)
+                retry_system = system + (
+                    " 前回候補はjudgeで不十分と判定された。今度は指摘を修正する。"
+                    " 人物関係資料がある場合はその実際の関係を使い、一般論や無難な逃げにしない。"
+                    " ただし資料にない好き嫌い・感情・出来事は発明しない。"
+                )
+                retry_user = user + "\n\n前回の失敗理由:" + ", ".join(retry_reasons) + (
+                    "\n4候補をすべて作り直す。前回候補の言い換えだけにしない。"
+                )
+                retry_res = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": retry_system},
+                        {"role": "user", "content": retry_user},
+                    ],
+                    temperature=min(self.temperature, 0.72),
+                    max_completion_tokens=max(self.groq_completion_tokens, 384),
+                    extra_body={"reasoning_effort": self.groq_reasoning_effort},
+                )
+                retry_raw = self.completion_text(retry_res, "groq_retry")
+                retry_raw = _repair_surface_corruption(retry_raw)
+                print("groq_retry_raw:", retry_raw, flush=True)
+                retry_candidates = []
+                for cand in self.persona_judge.split_candidates(retry_raw):
+                    cand_clean = clean_reply(user_text, cand)
+                    cand_clean = self.remove_unverified_vocative(cand_clean, speaker)
+                    cand_clean = _repair_surface_corruption(cand_clean)
+                    if cand_clean:
+                        retry_candidates.append(cand_clean)
+                print("persona_retry_candidates:", retry_candidates, flush=True)
+                retry_chosen, retry_judge_info = self.persona_judge.choose(
+                    retry_candidates, user_text, judge_result
+                )
+                print("persona_retry_judge:", retry_judge_info, flush=True)
+                if retry_chosen:
+                    chosen = retry_chosen
+                    judge_info = retry_judge_info
 
             answer = chosen
             if (

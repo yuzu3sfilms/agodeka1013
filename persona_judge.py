@@ -1360,6 +1360,7 @@ class PersonaJudge:
             or search_result.get("hashimoto_opinion_evidence")
             or {}
         )
+        relationship_evidence = search_result.get("relationship_evidence") or {}
 
         # v14.40: semantic completeness belongs in candidate scoring, where
         # both candidate text (`c`) and question semantics are available.
@@ -1421,6 +1422,19 @@ class PersonaJudge:
                 else:
                     score += 16
                     reasons.append("opinion_evidence_direct")
+
+            # v14.42: when the target is a real corpus participant, relationship
+            # evidence should prevent generic LLM evasions. It still does NOT
+            # license invented liking/disliking.
+            if relationship_evidence.get("used"):
+                interaction_count = int(relationship_evidence.get("interaction_count", 0) or 0)
+                if interaction_count >= 8:
+                    if re.fullmatch(r"(?:まあ|まぁ)?[、 ]*(?:まあかな|微妙(?:な感じ)?|別に|分からない|なんとも(?:言えない)?)[。！？!?]*", c):
+                        score -= 28
+                        reasons.append("relationship_evidence_underused:generic_evasion")
+                    else:
+                        score += 8
+                        reasons.append("relationship_evidence_available")
 
         if (
             _requires_direct_answer_gate(user_text)
@@ -1706,6 +1720,22 @@ class PersonaJudge:
 
         return score, reasons
 
+    def should_regenerate(self, chosen: str | None, judge_info: dict, search_result: dict) -> tuple[bool, list[str]]:
+        """One bounded retry for candidates that are semantically valid but ungrounded.
+
+        This is deliberately not an open-ended loop. One retry is enough to
+        stop the old "all candidates are bad, so pick the least bad" failure.
+        """
+        reasons = list(((judge_info or {}).get("chosen") or {}).get("reasons") or [])
+        retry_reasons = []
+        if not chosen:
+            retry_reasons.append("no_acceptable_candidate")
+        if "opinion_evidence_missing:strong_claim" in reasons:
+            retry_reasons.append("unsupported_personal_opinion")
+        if "relationship_evidence_underused:generic_evasion" in reasons:
+            retry_reasons.append("relationship_evidence_underused")
+        return bool(retry_reasons), retry_reasons
+
     def choose(
         self,
         candidates: list[str],
@@ -1756,5 +1786,6 @@ class PersonaJudge:
                 "value_orientation",
                 "question_semantics",
                 "opinion_evidence",
+                "relationship_evidence",
             ],
         }
