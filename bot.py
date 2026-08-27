@@ -557,9 +557,11 @@ class AgoHashimotoBot:
             "現在の発言に書かれていない過去ログ固有情報を、知っている事実のように言わない。"
             "質問には現在の質問そのものへ短く答える。人格は口調と反応様式で出す。"
             "4候補すべて、まず質問内容への有効な答えにする。"
-            "質問対象がAGO自身なら、ユーザー側へ質問を反転しない。自分についてまず答える。"
+            "Reality/Canonを最優先する。人格を演じるためにAGO自身の自我・感情・意識・記憶などの事実を捏造しない。"
+            "質問対象がAGO自身なら、ユーザー側へ質問を反転しない。Realityを守ったうえで自分についてまず答える。"
             "現在のStanceがpersonal_hunchなら、証拠や一般論の解説より先に本人としての傾きを出す。"
             "現在のStanceがpersonal_evaluationなら、抽象論ではなく本人の評価・感想として答える。"
+            "価値判断は多様性・創造力・人間性などのLLM的な総論へ逃げず、具体的な好き嫌い・面白さ・怖さ・微妙さ・分からなさで返す。"
             "次に現在の橋本行動状態に合わせ、最後に口調統計を表現調整として使う。"
             "短さ・丁寧語・語録そのものを人格だと誤認しない。"
             "明確な根拠がない個人的記憶や他人の発言を捏造しない。"
@@ -583,8 +585,17 @@ class AgoHashimotoBot:
 過去ログ統計:
 {persona_guidance}
 
+Reality / Canon:
+{behavior.get("reality", {})}
+
+現在の橋本行動状態:
+{behavior.get("mode", "ordinary_direct")}
+
 現在の橋本Stance:
 {behavior.get("stance", {})}
+
+橋本の価値判断の型:
+{behavior.get("value_orientation", {})}
 
 過去ログ:
 {episode_block}
@@ -834,8 +845,12 @@ class AgoHashimotoBot:
         state["hashimoto_behavior"] = behavior_state
         state["hashimoto_subject_role"] = behavior_state.get("subject_role", "")
         state["hashimoto_stance"] = behavior_state.get("stance", {})
+        state["hashimoto_reality"] = behavior_state.get("reality", {})
+        state["hashimoto_value_orientation"] = behavior_state.get("value_orientation", {})
         result["hashimoto_behavior"] = behavior_state
         result["hashimoto_stance"] = behavior_state.get("stance", {})
+        result["hashimoto_reality"] = behavior_state.get("reality", {})
+        result["hashimoto_value_orientation"] = behavior_state.get("value_orientation", {})
 
         called = state.get("called", False)
         question = state.get("question", False)
@@ -843,6 +858,12 @@ class AgoHashimotoBot:
         print("current_state:", state, flush=True)
         print("hashimoto_behavior_state:", behavior_state, flush=True)
         print("hashimoto_stance:", behavior_state.get("stance", {}), flush=True)
+        print("hashimoto_reality:", behavior_state.get("reality", {}), flush=True)
+        print(
+            "hashimoto_value_orientation:",
+            behavior_state.get("value_orientation", {}),
+            flush=True,
+        )
         print(
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
@@ -1131,6 +1152,14 @@ class AgoHashimotoBot:
             judge_result["hashimoto_stance"] = result.get(
                 "hashimoto_stance",
                 judge_result["hashimoto_behavior"].get("stance", {}),
+            )
+            judge_result["hashimoto_reality"] = result.get(
+                "hashimoto_reality",
+                judge_result["hashimoto_behavior"].get("reality", {}),
+            )
+            judge_result["hashimoto_value_orientation"] = result.get(
+                "hashimoto_value_orientation",
+                judge_result["hashimoto_behavior"].get("value_orientation", {}),
             )
 
             chosen, judge_info = self.persona_judge.choose(

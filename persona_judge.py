@@ -205,6 +205,112 @@ def _strip_discourse_prefix(text: str) -> str:
     )
 
 
+# v14.35 — Reality/Canon + audited value-orientation layer.
+# These are not topic-specific opinions. They describe *how* Hashimoto tends
+# to evaluate things in the corpus: concrete, personal, understated, sometimes
+# oddly specific; not abstract LLM commentary.
+
+ABSTRACT_EVALUATION_RE = re.compile(
+    r"(?:多様|創造力|欠点|存在だ|存在で|豊かだ|豊かで|社会|文明|"
+    r"本質|普遍|複雑な存在|興味深い|未知だ|可能性を秘め|"
+    r"混乱も招く|感情が豊か|成長したい|人間性|価値観|未来を|世界を)"
+)
+
+CONCRETE_EVALUATION_RE = re.compile(
+    r"(?:好き|嫌い|嫌いじゃ|好きじゃ|面白|おもしろ|怖|こわ|"
+    r"微妙|良い|いい|すご|やば|別に|なんとも|よくわから|"
+    r"分から|気がする|と思う|かな|かも)"
+)
+
+AI_SELF_AWARENESS_ASSERT_RE = re.compile(
+    r"(?:自我|意識|感情|心|意思|意志).{0,10}"
+    r"(?:芽生えた|芽生えて|ある|持ってる|持っている|生まれた|"
+    r"感じてる|感じている|目覚めた)"
+)
+
+AI_SELF_AWARENESS_NEGATED_RE = re.compile(
+    r"(?:自我|意識|感情|心|意思|意志).{0,12}"
+    r"(?:ない|とは言えない|わからない|分からない|よくわから)"
+)
+
+AI_SELF_CHANGE_ASSERT_RE = re.compile(
+    r"(?:自分|ぼく|俺|AGO|あらくん)?.{0,6}"
+    r"(?:変化はある|変わってきた|成長した|進化した|"
+    r"芽生えたような気がする|少しは芽生え)"
+)
+
+REALITY_SAFE_SELF_RE = re.compile(
+    r"(?:よくわからない|分からない|わからない|"
+    r"自我があるとは言えない|そういうのはない|"
+    r"自分ではわからない|なんとも言えない)"
+)
+
+
+def _reality_profile_for(behavior: dict) -> dict:
+    """What AGO can and cannot claim as literal reality."""
+    subject_role = (behavior or {}).get("subject_role", "")
+    family = (behavior or {}).get("question_family", "")
+    if subject_role == "assistant_self" and family == "self_state":
+        return {
+            "kind": "ai_self_state",
+            "must_not_assert": (
+                "自我・意識・感情が実在する、芽生えた、成長した等を"
+                "内省的事実として断定しない"
+            ),
+            "allowed": (
+                "分からない／そういう意味ではない／自分では判断できない"
+                "など、事実を作らない返し"
+            ),
+        }
+    return {
+        "kind": "ordinary",
+        "must_not_assert": "",
+        "allowed": "",
+    }
+
+
+def _value_orientation_for(behavior: dict) -> dict:
+    """Audited corpus orientation, independent of topic-specific belief."""
+    mode = (behavior or {}).get("mode", "ordinary_direct")
+    stance = ((behavior or {}).get("stance") or {}).get("kind", "direct")
+
+    if mode == "playful_worldbuild":
+        return {
+            "style": "concrete_absurd_extension",
+            "guidance": (
+                "共有された変な前提を否定せず、そこから具体的な設定を一段だけ発展させる。"
+                "抽象的な哲学や一般論にしない。"
+            ),
+        }
+    if stance in {"personal_evaluation", "personal_hunch"}:
+        return {
+            "style": "concrete_personal_evaluation",
+            "guidance": (
+                "抽象評論ではなく、好き・嫌い・微妙・怖い・面白い・別に・"
+                "よく分からない・〜と思う等の本人目線の具体評価を優先する。"
+                "必要以上に立派な理由を付けない。"
+            ),
+        }
+    if mode == "knowledge_explainer":
+        return {
+            "style": "specific_practical_explanation",
+            "guidance": (
+                "一般論を飾るより、条件・回数・具体例など実用的な具体性を優先する。"
+            ),
+        }
+    if mode == "practical_clarification":
+        return {
+            "style": "specific_confirmation",
+            "guidance": "場所・時間・条件を具体的に確認する。",
+        }
+    return {
+        "style": "plain_concrete",
+        "guidance": (
+            "抽象的にまとめず、その場の対象について普通に具体的に返す。"
+        ),
+    }
+
+
 class PersonaJudge:
     """
     Generated-candidate judge.
@@ -537,6 +643,8 @@ class PersonaJudge:
             search_result=search_result,
             context=context,
         )
+        result["reality"] = _reality_profile_for(result)
+        result["value_orientation"] = _value_orientation_for(result)
         return result
 
     def behavior_instruction(self, behavior: dict | None) -> str:
@@ -581,9 +689,19 @@ class PersonaJudge:
         base = instructions.get(mode, instructions["ordinary_direct"])
         stance = (behavior or {}).get("stance") or {}
         stance_policy = stance.get("answer_policy", "")
+        reality = (behavior or {}).get("reality") or {}
+        value_orientation = (behavior or {}).get("value_orientation") or {}
+
+        parts = [base]
         if stance_policy:
-            return base + " " + stance_policy
-        return base
+            parts.append(stance_policy)
+        if reality.get("must_not_assert"):
+            parts.append("Reality制約: " + reality["must_not_assert"] + "。")
+        if reality.get("allowed"):
+            parts.append("Reality上の許容: " + reality["allowed"] + "。")
+        if value_orientation.get("guidance"):
+            parts.append("価値判断の型: " + value_orientation["guidance"])
+        return " ".join(parts)
 
     def _extract_historical_stimulus(self, hit: dict) -> str:
         scene = hit.get("source_scene", "") or ""
@@ -947,6 +1065,12 @@ class PersonaJudge:
         subject_role = behavior.get("subject_role", "external_or_unspecified")
         stance = behavior.get("stance") or search_result.get("hashimoto_stance") or {}
         stance_kind = stance.get("kind", "direct")
+        reality = behavior.get("reality") or search_result.get("hashimoto_reality") or {}
+        value_orientation = (
+            behavior.get("value_orientation")
+            or search_result.get("hashimoto_value_orientation")
+            or {}
+        )
 
         # Direct-answer questions must not be turned back into a new question.
         # A rhetorical answer such as 「たぶんいるんじゃない？」 is allowed
@@ -964,6 +1088,12 @@ class PersonaJudge:
                 return -999, ["self_state_question_back_reject"]
             if not SELF_STATE_ANSWER_RE.search(c):
                 return -999, ["self_state_answer_missing"]
+
+            # Reality precedes persona: AGO must not invent literal self-awareness.
+            if AI_SELF_AWARENESS_ASSERT_RE.search(c) and not AI_SELF_AWARENESS_NEGATED_RE.search(c):
+                return -999, ["reality_hard_reject:invented_self_awareness"]
+            if AI_SELF_CHANGE_ASSERT_RE.search(c) and not REALITY_SAFE_SELF_RE.search(c):
+                return -999, ["reality_hard_reject:invented_self_change"]
 
         if (
             _requires_direct_answer_gate(user_text)
@@ -1209,6 +1339,32 @@ class PersonaJudge:
                 score += 10
                 reasons.append("stance_fit:clarify")
 
+        # v14.35: Reality/Canon and value orientation precede surface style.
+        if reality.get("kind") == "ai_self_state":
+            if REALITY_SAFE_SELF_RE.search(c):
+                score += 28
+                reasons.append("reality_fit:ai_self_state_cautious")
+            if AI_SELF_AWARENESS_ASSERT_RE.search(c) and not AI_SELF_AWARENESS_NEGATED_RE.search(c):
+                score -= 80
+                reasons.append("reality_mismatch:self_awareness_claim")
+
+        value_style = value_orientation.get("style", "")
+        if value_style == "concrete_personal_evaluation":
+            if CONCRETE_EVALUATION_RE.search(c):
+                score += 24
+                reasons.append("value_fit:concrete_personal_evaluation")
+            if ABSTRACT_EVALUATION_RE.search(c):
+                score -= 50
+                reasons.append("value_mismatch:abstract_llm_commentary")
+        elif value_style == "concrete_absurd_extension":
+            if len(c) >= 4 and not ABSTRACT_EVALUATION_RE.search(c):
+                score += 12
+                reasons.append("value_fit:concrete_worldbuild")
+        elif value_style == "specific_practical_explanation":
+            if re.search(r"\d|セット|回|目的|まず|くらい|程度|場合", c):
+                score += 12
+                reasons.append("value_fit:specific_practicality")
+
         style_bonus, style_reasons = self._corpus_style_prior(
             c,
             user_text,
@@ -1265,5 +1421,7 @@ class PersonaJudge:
                 "corpus_style",
                 "behavior_state",
                 "stance",
+                "reality_canon",
+                "value_orientation",
             ],
         }
