@@ -557,6 +557,9 @@ class AgoHashimotoBot:
             "現在の発言に書かれていない過去ログ固有情報を、知っている事実のように言わない。"
             "質問には現在の質問そのものへ短く答える。人格は口調と反応様式で出す。"
             "4候補すべて、まず質問内容への有効な答えにする。"
+            "質問対象がAGO自身なら、ユーザー側へ質問を反転しない。自分についてまず答える。"
+            "現在のStanceがpersonal_hunchなら、証拠や一般論の解説より先に本人としての傾きを出す。"
+            "現在のStanceがpersonal_evaluationなら、抽象論ではなく本人の評価・感想として答える。"
             "次に現在の橋本行動状態に合わせ、最後に口調統計を表現調整として使う。"
             "短さ・丁寧語・語録そのものを人格だと誤認しない。"
             "明確な根拠がない個人的記憶や他人の発言を捏造しない。"
@@ -579,6 +582,9 @@ class AgoHashimotoBot:
 
 過去ログ統計:
 {persona_guidance}
+
+現在の橋本Stance:
+{behavior.get("stance", {})}
 
 過去ログ:
 {episode_block}
@@ -826,13 +832,17 @@ class AgoHashimotoBot:
         self.behavior_modes[chat_id] = behavior_state["mode"]
         state["hashimoto_mode"] = behavior_state["mode"]
         state["hashimoto_behavior"] = behavior_state
+        state["hashimoto_subject_role"] = behavior_state.get("subject_role", "")
+        state["hashimoto_stance"] = behavior_state.get("stance", {})
         result["hashimoto_behavior"] = behavior_state
+        result["hashimoto_stance"] = behavior_state.get("stance", {})
 
         called = state.get("called", False)
         question = state.get("question", False)
 
         print("current_state:", state, flush=True)
         print("hashimoto_behavior_state:", behavior_state, flush=True)
+        print("hashimoto_stance:", behavior_state.get("stance", {}), flush=True)
         print(
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
@@ -1117,6 +1127,10 @@ class AgoHashimotoBot:
             judge_result["hashimoto_behavior"] = result.get(
                 "hashimoto_behavior",
                 {"mode": self.behavior_modes[chat_id]},
+            )
+            judge_result["hashimoto_stance"] = result.get(
+                "hashimoto_stance",
+                judge_result["hashimoto_behavior"].get("stance", {}),
             )
 
             chosen, judge_info = self.persona_judge.choose(

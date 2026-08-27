@@ -65,8 +65,9 @@ def _candidate_act_matches(candidate: str, user_text: str) -> bool:
     if act == "question":
         return bool(re.search(
             r"はい|うん|そう|ある|ない|いる|いない|いそう|ありそう|"
-            r"思う|思わ|かも|強|弱|増|減|変わ|"
-            r"わから|分から|知らな|たぶん|多分|まだ|もう",
+            r"思う|思わ|感じ|面白|興味|好き|嫌い|苦手|怖|すご|微妙|"
+            r"かも|強|弱|増|減|変わ|芽生|"
+            r"わから|分から|知らな|たぶん|多分|まあ|別に|まだ|もう",
             c,
         ))
     return True
@@ -166,6 +167,44 @@ def _requires_direct_answer_gate(user_text: str) -> bool:
     return bool(DIRECT_ANSWER_PREDICATE_RE.search(text))
 
 
+SELF_ALIAS_RE = re.compile(
+    r"(?:お前|おまえ|あんた|橋本|橋本新|あらくん|アラクン|顎|AGO|ago)"
+)
+
+SELF_STATE_RE = re.compile(
+    r"(?:自我|意思|意志|感情|人格|心|意識|自分で考|自分の考え|"
+    r"自我が|芽生え|目覚め|成長した|進化した)"
+)
+
+EPISTEMIC_DEFERRAL_RE = re.compile(
+    r"(?:証拠|確証|確定した情報|確認され|見つかっていな|"
+    r"可能性はゼロ|現時点では|今のところ|興味深い話題|"
+    r"確かめるのは|科学的には|一般的には)"
+)
+
+PERSONAL_LEAN_RE = re.compile(
+    r"(?:と思う|気がする|かも|いそう|ありそう|たぶん|多分|"
+    r"まあ|別に|好き|嫌い|面白|興味|怖|苦手|微妙|わから)"
+)
+
+SELF_STATE_ANSWER_RE = re.compile(
+    r"(?:ある|ない|まだ|もう|芽生|変わ|増え|減っ|強く|"
+    r"思う|感じ|わから|分から|たぶん|多分|まあ|別に)"
+)
+
+
+def _question_like(text: str) -> bool:
+    return bool(re.search(r"[？?]", text or ""))
+
+
+def _strip_discourse_prefix(text: str) -> str:
+    return re.sub(
+        r"^(?:じゃあ|じゃ|てか|というか|つか|で、?|んで、?)\s*",
+        "",
+        (text or "").strip(),
+    )
+
+
 class PersonaJudge:
     """
     Generated-candidate judge.
@@ -202,7 +241,7 @@ class PersonaJudge:
         self.persona_policy = PersonaPolicy(data_dir)
 
     def question_family(self, text: str) -> str:
-        t = (text or "").strip()
+        t = _strip_discourse_prefix((text or "").strip())
         if not re.search(r"[？?]", t):
             if re.fullmatch(r"(?:きゃぴ|ｷｬﾋﾟ|キャピ|きゃっ|ｷｬｯﾋﾟ[ｲｨ]?)[！!~〜～]*", t, re.I):
                 return "burst"
@@ -211,6 +250,8 @@ class PersonaJudge:
             return "count"
         if re.search(r"どこ|何処|場所|何口|何線", t):
             return "location"
+        if SELF_STATE_RE.search(t):
+            return "self_state"
         if re.search(r"何時|いつ|何分|何時半", t):
             return "time"
         if re.search(r"いくら|何円|値段|料金", t):
@@ -228,6 +269,126 @@ class PersonaJudge:
         if re.search(r"何|なに|誰|だれ|どれ|どの|どう", t):
             return "open_wh"
         return "yesno"
+
+    def resolve_subject_role(
+        self,
+        user_text: str,
+        relation: dict | None = None,
+    ) -> dict:
+        """Resolve whether the question is about AGO itself or another subject.
+
+        Explicit inherited subjects outrank vague self-state language, except
+        when the utterance contains an intrinsic self-state concept such as
+        「自我芽生えた？」.
+        """
+        relation = relation or {}
+        text = _strip_discourse_prefix(user_text or "")
+        resolved = str(relation.get("resolved_subject", "") or "").strip()
+        inherited = bool(relation.get("subject_inherited"))
+
+        intrinsic_self = bool(SELF_STATE_RE.search(text))
+        explicit_self = bool(SELF_ALIAS_RE.search(text))
+
+        if intrinsic_self or explicit_self:
+            return {
+                "subject_role": "assistant_self",
+                "subject": "AGO_SELF",
+                "reason": "explicit_or_intrinsic_self_reference",
+            }
+
+        if inherited and resolved:
+            return {
+                "subject_role": "inherited_external",
+                "subject": resolved,
+                "reason": "dialogue_subject_inherited",
+            }
+
+        if resolved:
+            return {
+                "subject_role": "external",
+                "subject": resolved,
+                "reason": "explicit_external_subject",
+            }
+
+        return {
+            "subject_role": "external_or_unspecified",
+            "subject": "",
+            "reason": "no_self_reference",
+        }
+
+    def infer_stance(
+        self,
+        user_text: str,
+        behavior: dict | None = None,
+        search_result: dict | None = None,
+        context: str = "",
+    ) -> dict:
+        """Infer the *kind* of internal stance required before wording.
+
+        This does not invent a topic-specific belief. It controls how Hashimoto
+        should form an answer: personal hunch, personal evaluation, self-state,
+        clarification, explanation, or plain factual response.
+        """
+        behavior = behavior or {}
+        family = behavior.get("question_family") or self.question_family(user_text)
+        subject_role = behavior.get("subject_role", "external_or_unspecified")
+        mode = behavior.get("mode", "ordinary_direct")
+        text = _strip_discourse_prefix(user_text or "")
+
+        if subject_role == "assistant_self" or family == "self_state":
+            return {
+                "kind": "self_state",
+                "certainty": "introspective_cautious",
+                "answer_policy": (
+                    "AGO自身について聞かれている。ユーザーへ質問を反転せず、"
+                    "まず自分側の状態として答える。仕組みや感情を捏造せず、"
+                    "必要なら曖昧さを短く残す。"
+                ),
+            }
+
+        if family in {"opinion", "preference", "experience"}:
+            return {
+                "kind": "personal_evaluation",
+                "certainty": "subjective",
+                "answer_policy": (
+                    "一般論ではなく自分の評価・好み・感想として答える。"
+                    "過去ログにない具体的経験は作らない。"
+                ),
+            }
+
+        if family == "yesno" and re.search(
+            r"(?:いる|ある|本当|ほんと|存在|できる|なる|思う)",
+            text,
+        ):
+            return {
+                "kind": "personal_hunch",
+                "certainty": "low_to_medium",
+                "answer_policy": (
+                    "確証の有無を解説するより先に、本人としての単純な傾きを答える。"
+                    "『いると思う』『いない気がする』『わからない』等の立場を先に出し、"
+                    "証拠・科学・一般論の講釈は求められた時だけにする。"
+                ),
+            }
+
+        if mode == "practical_clarification":
+            return {
+                "kind": "clarify",
+                "certainty": "needs_context",
+                "answer_policy": "不足情報があれば具体的に確認する。",
+            }
+
+        if mode == "knowledge_explainer":
+            return {
+                "kind": "explain",
+                "certainty": "domain_reasoning",
+                "answer_policy": "目的や条件に沿って具体的に説明する。",
+            }
+
+        return {
+            "kind": "direct",
+            "certainty": "ordinary",
+            "answer_policy": "現在の問いへ普通に直接答える。",
+        }
 
     def infer_behavior_state(
         self,
@@ -250,7 +411,9 @@ class PersonaJudge:
         text = (user_text or "").strip()
         recent = "\n".join((context or "").splitlines()[-6:])
         family = self.question_family(text)
-        reasons = []
+        subject_info = self.resolve_subject_role(text, relation)
+        subject_role = subject_info["subject_role"]
+        reasons = [f"subject:{subject_info['reason']}"]
         confidence = 0.66
 
         burst = bool(re.fullmatch(
@@ -303,6 +466,7 @@ class PersonaJudge:
         self_disclosure = family in {"opinion", "preference", "experience"} or bool(
             re.search(r"お前は|橋本は|あらくんは|自分はどう", text)
         )
+        self_state = subject_role == "assistant_self" or family == "self_state"
         serious = relation.get("relation") in {"repair_request"} or bool(
             re.search(r"ごめん|すみません|本気|冗談|怒って|大丈夫|困った|"
                       r"間違|勘違い|どうすれば", text)
@@ -328,6 +492,10 @@ class PersonaJudge:
             mode = "knowledge_explainer"
             confidence = 0.90
             reasons.append("audited_interest_domain_plus_explanation")
+        elif self_state:
+            mode = "self_state"
+            confidence = 0.94
+            reasons.append("assistant_self_state_question")
         elif self_disclosure:
             mode = "self_disclosure"
             confidence = 0.91
@@ -355,12 +523,21 @@ class PersonaJudge:
             confidence = max(confidence, 0.78)
             reasons.append(f"followup_state_persistence:{previous_mode}")
 
-        return {
+        result = {
             "mode": mode,
             "confidence": round(confidence, 2),
             "question_family": family,
+            "subject_role": subject_role,
+            "subject": subject_info.get("subject", ""),
             "reasons": reasons,
         }
+        result["stance"] = self.infer_stance(
+            user_text=text,
+            behavior=result,
+            search_result=search_result,
+            context=context,
+        )
+        return result
 
     def behavior_instruction(self, behavior: dict | None) -> str:
         mode = (behavior or {}).get("mode", "ordinary_direct")
@@ -392,12 +569,21 @@ class PersonaJudge:
                 "自分の意見・好み・感想を聞かれているので、その問いへ直接答える。"
                 "過去ログにない具体的な経験談は捏造しない。"
             ),
+            "self_state": (
+                "AGO自身の状態について聞かれている。質問をユーザー側へ反転せず、"
+                "まず自分について答える。自我・感情・意識の仕組みを勝手に設定しない。"
+            ),
             "playful_burst": (
                 "今の発言自体が高テンション語録モード。短い反応や同型のノリを"
                 "許可するが、このモード以外へキャピ等を漏らさない。"
             ),
         }
-        return instructions.get(mode, instructions["ordinary_direct"])
+        base = instructions.get(mode, instructions["ordinary_direct"])
+        stance = (behavior or {}).get("stance") or {}
+        stance_policy = stance.get("answer_policy", "")
+        if stance_policy:
+            return base + " " + stance_policy
+        return base
 
     def _extract_historical_stimulus(self, hit: dict) -> str:
         scene = hit.get("source_scene", "") or ""
@@ -756,6 +942,29 @@ class PersonaJudge:
         if not c:
             return -999, ["empty"]
 
+        behavior = search_result.get("hashimoto_behavior") or {}
+        family = behavior.get("question_family") or self.question_family(user_text)
+        subject_role = behavior.get("subject_role", "external_or_unspecified")
+        stance = behavior.get("stance") or search_result.get("hashimoto_stance") or {}
+        stance_kind = stance.get("kind", "direct")
+
+        # Direct-answer questions must not be turned back into a new question.
+        # A rhetorical answer such as 「たぶんいるんじゃない？」 is allowed
+        # when it already contains a clear stance marker.
+        if family in {"yesno", "self_state"} and _question_like(c):
+            rhetorical_answer = bool(PERSONAL_LEAN_RE.search(c)) and not (
+                subject_role == "assistant_self"
+                and re.search(r"(?:どんな|どう|何が|なんか変わって)", c)
+            )
+            if not rhetorical_answer:
+                return -999, ["question_back_hard_reject"]
+
+        if subject_role == "assistant_self" and family == "self_state":
+            if _question_like(c):
+                return -999, ["self_state_question_back_reject"]
+            if not SELF_STATE_ANSWER_RE.search(c):
+                return -999, ["self_state_answer_missing"]
+
         if (
             _requires_direct_answer_gate(user_text)
             and not _candidate_act_matches(c, user_text)
@@ -967,6 +1176,39 @@ class PersonaJudge:
             score -= 70
             reasons.append("burst_leak_outside_burst_mode")
 
+        # v14.34: internal stance outranks surface persona.
+        if stance_kind == "personal_hunch":
+            if PERSONAL_LEAN_RE.search(c):
+                score += 22
+                reasons.append("stance_fit:personal_hunch")
+            if EPISTEMIC_DEFERRAL_RE.search(c):
+                score -= 55
+                reasons.append("stance_mismatch:epistemic_deferral")
+        elif stance_kind == "personal_evaluation":
+            abstract_eval = bool(re.search(
+                r"興味深い(?:存在|対象|話題)|まだまだ未知|未知(?:だ|です)|"
+                r"一般的|確定した情報|存在(?:だ|です)",
+                c,
+            ))
+            if abstract_eval:
+                score -= 55
+                reasons.append("stance_mismatch:abstract_commentary")
+            elif re.search(
+                r"好き|嫌い|面白|興味|怖|苦手|微妙|すご|"
+                r"と思う|感じ|まあ|別に|わから",
+                c,
+            ):
+                score += 20
+                reasons.append("stance_fit:personal_evaluation")
+        elif stance_kind == "self_state":
+            if SELF_STATE_ANSWER_RE.search(c) and not _question_like(c):
+                score += 24
+                reasons.append("stance_fit:self_state")
+        elif stance_kind == "clarify":
+            if _question_like(c):
+                score += 10
+                reasons.append("stance_fit:clarify")
+
         style_bonus, style_reasons = self._corpus_style_prior(
             c,
             user_text,
@@ -1022,5 +1264,6 @@ class PersonaJudge:
                 "provenance",
                 "corpus_style",
                 "behavior_state",
+                "stance",
             ],
         }
