@@ -1,20 +1,9 @@
 """Canonical identity metadata for Project AGO."""
-
 PROJECT_NAME = "Project AGO"
 PROJECT_EXPANSION = "Alternative Generated Organism"
-PROJECT_VERSION = "v14.46"
+PROJECT_VERSION = "v14.47"
 PROJECT_INSTANCE = "AGO-HASHIMOTO"
 PROJECT_SLUG = "project-ago"
 
-
-def runtime_label() -> str:
-    return f"{PROJECT_NAME} {PROJECT_VERSION} ({PROJECT_INSTANCE})"
-
-
-def health_payload() -> dict[str, str]:
-    return {
-        "project": PROJECT_NAME,
-        "expansion": PROJECT_EXPANSION,
-        "instance": PROJECT_INSTANCE,
-        "version": PROJECT_VERSION,
-    }
+def runtime_label(): return f"{PROJECT_NAME} {PROJECT_VERSION} ({PROJECT_INSTANCE})"
+def health_payload(): return {"project":PROJECT_NAME,"expansion":PROJECT_EXPANSION,"instance":PROJECT_INSTANCE,"version":PROJECT_VERSION}
