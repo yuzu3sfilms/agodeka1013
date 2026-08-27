@@ -511,6 +511,18 @@ class PersonaJudge:
            subject followed immediately by Hashimoto's reply.
         """
         behavior = behavior or {}
+
+        # v14.39: semantic completeness guard.
+        # Run only after local `behavior` has been initialized.
+        qsem = (behavior or {}).get("question_semantics", {}) if isinstance(behavior, dict) else {}
+        required_semantics = qsem.get("required", "")
+
+        if DANGLING_DEICTIC_RE.search(c):
+            return -999, ["semantic_incomplete:dangling_deictic"]
+
+        if required_semantics == "personal_evaluation":
+            if "ざっくり言えばそう" in c or re.search(r"(?:だけど|けど)[、 ]*そうだ[。！？]?$", c):
+                return -999, ["semantic_incomplete:opinion_missing_evaluation"]
         search_result = search_result or {}
         family = behavior.get("question_family", self.question_family(user_text))
         if family not in {"opinion", "preference", "experience"}:
@@ -1303,20 +1315,6 @@ class PersonaJudge:
 
     def score(self, candidate: str, user_text: str, search_result: dict):
         c = (candidate or "").strip()
-        # v14.38: semantic completeness before style/persona scoring.
-        qsem = (behavior or {}).get("question_semantics", {}) if isinstance(behavior, dict) else {}
-        required_semantics = qsem.get("required", "")
-
-        # Reject answers whose final claim depends on a missing antecedent.
-        if DANGLING_DEICTIC_RE.search(c):
-            return -999, ["semantic_incomplete:dangling_deictic"]
-
-        # For explicit opinion questions, "I don't know / don't care" is allowed only
-        # when it is itself the complete answer, not when followed by an empty "そうだ".
-        if required_semantics == "personal_evaluation":
-            if "ざっくり言えばそう" in c or re.search(r"(?:だけど|けど)[、 ]*そうだ[。！？]?$", c):
-                return -999, ["semantic_incomplete:opinion_missing_evaluation"]
-
         if SURFACE_CORRUPTION_RE.search(c):
             return -999, ["surface_corruption_hard_reject"]
         nc = normalize(c)
