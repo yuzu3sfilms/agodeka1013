@@ -1,3 +1,34 @@
+
+# v14.37 — non-destructive surface guard.
+# Persona should come from prompting + PersonaJudge, not from blind suffix rewriting.
+_SURFACE_BAD_REWRITES = (
+    ("と思いるわ", "と思います"),
+    ("と思いる", "と思います"),
+    ("ているわ", "ています"),
+    ("てるわ", "てる"),
+    ("不明だわ", "不明です"),
+)
+
+def _repair_surface_corruption(text: str) -> str:
+    """Repair only clearly broken post-generation rewrites.
+
+    This intentionally does NOT try to 'make text Hashimoto-like'.
+    It only undoes mechanically corrupted forms produced downstream.
+    """
+    t = (text or "").strip()
+    for bad, good in _SURFACE_BAD_REWRITES:
+        t = t.replace(bad, good)
+
+    # Mechanical polite->casual rewrites can create impossible hybrids.
+    t = re.sub(r"思い(?:ます|ました)るわ", "思います", t)
+    t = re.sub(r"でき(?:ます|ません)るわ", "できません", t)
+    t = re.sub(r"あり(?:ます|ません)るわ", "ありません", t)
+
+    # Never append a style tail after terminal polite forms.
+    t = re.sub(r"(です|ます|ません|でした|ました)だわ$", r"\1", t)
+
+    return t.strip()
+
 import os
 import random
 import re
@@ -566,6 +597,7 @@ class AgoHashimotoBot:
             "Opinion Evidenceがdirectなら、その方向と過去発言の範囲を守る。"
             "価値判断は多様性・創造力・人間性などのLLM的な総論へ逃げず、具体的に返す。"
             "次に現在の橋本行動状態に合わせ、最後に口調統計を表現調整として使う。"
+            "生成後に敬語や語尾を機械的に橋本風へ置換しない。文法的に自然な原文を優先する。"
             "短さ・丁寧語・語録そのものを人格だと誤認しない。"
             "明確な根拠がない個人的記憶や他人の発言を捏造しない。"
             "語尾でキャラを作らない。"
@@ -759,9 +791,8 @@ Opinion Evidence:
                         max_completion_tokens=max(self.groq_completion_tokens, 384),
                         extra_body={"reasoning_effort": self.groq_reasoning_effort},
                     )
-                    raw = de_ai_tone(
-                        self.completion_text(res, "continuity_groq")
-                    )
+                    raw = self.completion_text(res, "continuity_groq")
+                    raw = _repair_surface_corruption(raw)
                     print("continuity_groq_raw:", raw, flush=True)
                     candidates = self.persona_judge.split_candidates(raw)
                     cleaned = []
@@ -770,9 +801,9 @@ Opinion Evidence:
                             clean_reply(user_text, cand),
                             speaker,
                         )
-                        guarded, _ = guard_reply(cand, user_text)
-                        if guarded:
-                            cleaned.append(guarded)
+                        cand = _repair_surface_corruption(cand)
+                        if cand:
+                            cleaned.append(cand)
                     chosen, judge_info = self.persona_judge.choose(
                         cleaned,
                         user_text,
@@ -1133,33 +1164,20 @@ Opinion Evidence:
             )
             raw = self.completion_text(res, "groq")
             print("groq_raw:", raw, flush=True)
-            raw = de_ai_tone(raw)
+            raw = _repair_surface_corruption(raw)
             candidates = self.persona_judge.split_candidates(raw)
             print("persona_candidates:", candidates, flush=True)
 
             cleaned_candidates = []
             for cand in candidates:
                 cand_clean = clean_reply(user_text, cand)
-                guarded, guard_info = guard_reply(
+                cand_clean = self.remove_unverified_vocative(
                     cand_clean,
-                    user_text,
-                )
-                if guarded != cand_clean:
-                    print(
-                        "style_guard_candidate:",
-                        guard_info,
-                        "orig=",
-                        cand_clean,
-                        "guarded=",
-                        guarded,
-                        flush=True,
-                    )
-                guarded = self.remove_unverified_vocative(
-                    guarded,
                     speaker,
                 )
-                if guarded:
-                    cleaned_candidates.append(guarded)
+                cand_clean = _repair_surface_corruption(cand_clean)
+                if cand_clean:
+                    cleaned_candidates.append(cand_clean)
 
             judge_result = dict(result)
             judge_result["generation_grounding_text"] = "\n".join([

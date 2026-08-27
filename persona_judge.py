@@ -210,6 +210,12 @@ def _strip_discourse_prefix(text: str) -> str:
 # to evaluate things in the corpus: concrete, personal, understated, sometimes
 # oddly specific; not abstract LLM commentary.
 
+
+SURFACE_CORRUPTION_RE = re.compile(
+    r"(?:と思いる|と思いるわ|できませんる|できまする|"
+    r"ありませんる|ますだわ|ですだわ|不明だわ$)"
+)
+
 ABSTRACT_EVALUATION_RE = re.compile(
     r"(?:多様|創造力|欠点|存在だ|存在で|豊かだ|豊かで|社会|文明|"
     r"本質|普遍|複雑な存在|興味深い|未知だ|可能性を秘め|"
@@ -1282,6 +1288,8 @@ class PersonaJudge:
 
     def score(self, candidate: str, user_text: str, search_result: dict):
         c = (candidate or "").strip()
+        if SURFACE_CORRUPTION_RE.search(c):
+            return -999, ["surface_corruption_hard_reject"]
         nc = normalize(c)
         score = 100
         reasons = []
