@@ -171,6 +171,12 @@ SELF_ALIAS_RE = re.compile(
     r"(?:お前|おまえ|あんた|橋本|橋本新|あらくん|アラクン|顎|AGO|ago)"
 )
 
+# v14.41 — first-person pronouns in the user's utterance refer to the user,
+# not to AGO and not to an arbitrary external entity.
+USER_SELF_PRONOUN_RE = re.compile(
+    r"(?:^|[、。！？?\s])(?:俺|おれ|僕|ぼく|私|わたし|自分)(?:のこと|の|は|って|を|に|が|$)"
+)
+
 SELF_STATE_RE = re.compile(
     r"(?:自我|意思|意志|感情|人格|心|意識|自分で考|自分の考え|"
     r"自我が|芽生え|目覚め|成長した|進化した)"
@@ -229,6 +235,16 @@ DANGLING_DEICTIC_RE = re.compile(
 LOW_INFORMATION_OPINION_RE = re.compile(
     r"^(?:別に)?(?:どうでもいい|よく分からない|わからない|分からない)"
     r"(?:んだけど|けど|かな|ね|よ)?[。！？]?$"
+)
+
+# v14.41 — forms such as 「別に、思ってない」 are grammatically possible
+# fragments but do not supply the evaluation requested by 「どう思ってる？」.
+# Reject only narrow meta-predicate nonanswers; terse evaluations such as
+# 「微妙」「別に」「よく分からない」 remain available.
+OPINION_META_NONANSWER_RE = re.compile(
+    r"^(?:別に[、, ]*)?(?:特に[、, ]*)?(?:何も[、, ]*)?"
+    r"(?:思って(?:い)?ない|思わない|考えて(?:い)?ない)"
+    r"(?:よ|ね|かな)?[。！？]?$"
 )
 
 ABSTRACT_EVALUATION_RE = re.compile(
@@ -474,6 +490,16 @@ class PersonaJudge:
                 "subject_role": "assistant_self",
                 "subject": "AGO_SELF",
                 "reason": "explicit_or_intrinsic_self_reference",
+            }
+
+        # The speaker's first-person pronoun must resolve to the speaker.
+        # relation.resolved_subject may literally be "俺"; treating that as an
+        # external topic destroys relationship-aware opinion questions.
+        if USER_SELF_PRONOUN_RE.search(text):
+            return {
+                "subject_role": "user_self",
+                "subject": "USER_SELF",
+                "reason": "user_first_person_reference",
             }
 
         if inherited and resolved:
@@ -1345,6 +1371,8 @@ class PersonaJudge:
                 r"(?:だけど|けど)[、 ]*そうだ[。！？]?$", c
             ):
                 return -999, ["semantic_incomplete:opinion_missing_evaluation"]
+            if OPINION_META_NONANSWER_RE.search(c):
+                return -999, ["semantic_incomplete:opinion_meta_nonanswer"]
 
         # Direct-answer questions must not be turned back into a new question.
         # A rhetorical answer such as 「たぶんいるんじゃない？」 is allowed
