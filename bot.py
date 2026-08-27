@@ -73,6 +73,7 @@ class AgoHashimotoBot:
         self.last_bot_replies = defaultdict(lambda: deque(maxlen=5))
         self.last_reply_at = defaultdict(float)
         self.last_topic_terms = defaultdict(list)
+        self.behavior_modes = defaultdict(lambda: "ordinary_direct")
         self.seen_chats = set()
         self.shutdown_store = ShutdownStateStore()
 
@@ -168,19 +169,29 @@ class AgoHashimotoBot:
 
     def continuity_prompt(self, user_text: str, chat_id: str, relation: dict, speaker: SpeakerProfile):
         history = self.dialogue.context(chat_id, current_user_text=user_text, limit=8)
+        behavior = self.persona_judge.infer_behavior_state(
+            user_text=user_text,
+            context=history,
+            search_result={},
+            relation=relation,
+            previous_mode=self.behavior_modes[chat_id],
+        )
+        self.behavior_modes[chat_id] = behavior["mode"]
         persona_guidance = self.persona_judge.generation_guidance(
             user_text,
             speaker.canonical_name,
+            behavior,
         )
         system = (
             "橋本新本人風のAIアカウントとして、直前の会話につながる返答をする。"
             "現在の発言を単独の検索語として扱わず、直前のassistant発言とuser発言を最優先する。"
             "『え？』『何それ？』『どういうこと？』は直前回答への訂正・説明要求として処理する。"
-            "自分の直前回答に誤字、造語、矛盾、存在しない用語があれば、ごまかさず短く訂正する。"
-            "知らない言葉をもっともらしく定義しない。カメラ用語などと推測で断定しない。"
-            "話題を勝手に古いトピックへ戻さない。質問には先に答える。"
-            "口調は短く雑に。内容の正確さを壊してまでキャラ付けしない。"
-            "1〜3文。候補を4つ出す。"
+            "自分の直前回答に誤字、造語、矛盾、存在しない用語があれば、ごまかさず訂正する。"
+            "知らない言葉をもっともらしく定義しない。"
+            "話題を勝手に古いトピックへ戻さない。"
+            "最優先は現在の橋本行動状態。短文・長文・丁寧語・聞き返しを固定しない。"
+            "一人称も固定しない。必要がないなら省略し、必要なら文脈に自然なものだけ使う。"
+            "候補を4つ出す。"
         )
         user = f"""会話関係:{relation.get('relation')}
 判定理由:{relation.get('reason')}
@@ -321,6 +332,14 @@ class AgoHashimotoBot:
             intent=state.get("intent", ""),
             current_speaker=speaker.canonical_name,
         )
+        replay, replay_info = self.persona_judge.select_replay(
+            replay=replay,
+            replay_info=replay_info,
+            user_text=user_text,
+            behavior=state.get("hashimoto_behavior")
+                or result.get("hashimoto_behavior")
+                or {"mode": state.get("hashimoto_mode", "ordinary_direct")},
+        )
         base["replay"] = replay
         base["replay_info"] = replay_info
 
@@ -378,18 +397,26 @@ class AgoHashimotoBot:
 
     def fallback_prompt(self, user_text: str, context: str, chat_id: str, question: bool, speaker: SpeakerProfile):
         relation_style = "\n".join(self.relationships.style_samples(n=4))
+        behavior = self.persona_judge.infer_behavior_state(
+            user_text=user_text,
+            context=context,
+            search_result={},
+            relation={},
+            previous_mode=self.behavior_modes[chat_id],
+        )
         persona_guidance = self.persona_judge.generation_guidance(
             user_text,
             speaker.canonical_name,
+            behavior,
         )
         system = (
-            "橋本新本人風のAIアカウントとしてLINEで短く返す。"
+            "橋本新本人風のAIアカウントとしてLINEで返す。"
             "グループ内では「あらくん」「橋本」「顎」「AGODEKA」と呼ばれる同一人物。"
-            "説明AI禁止。自己説明禁止。"
-            "一人称は基本出さない。私/わたし/俺/おれは禁止。"
-            "過去ログに強い根拠がない時は、新設定を作らず短い反応だけにする。"
-            "1文。短く雑に。"
-            "「ぜ」「ないよ」「だよ」「よな」「だよな」「だよね」「なんだよね」「です」「ます」禁止。"
+            "説明AI・自己説明はしない。"
+            "過去ログに根拠がない具体的な記憶や設定は作らない。"
+            "短さや語尾を人格の代用品にしない。"
+            "現在の橋本行動状態に従い、確認が必要なら聞き、説明状態なら長くなってよく、"
+            "普通の会話では普通に答える。丁寧語も必要なら自然に使う。"
         )
         user = f"""mode:{'Q' if question else 'continue'}
 発言:{user_text}
@@ -505,28 +532,37 @@ class AgoHashimotoBot:
         reasons = str(search_result.get("relevance_reasons", []))[:300]
         recent = "\n".join(context.splitlines()[-2:])
         question = self.is_question(user_text)
+        behavior = search_result.get("hashimoto_behavior") or self.persona_judge.infer_behavior_state(
+            user_text=user_text,
+            context=context,
+            search_result=search_result,
+            relation={},
+            previous_mode=self.behavior_modes[chat_id],
+        )
         persona_guidance = self.persona_judge.generation_guidance(
             user_text,
             speaker.canonical_name,
+            behavior,
         )
         system = (
             "あなたは橋本新本人風のAIアカウント。ただしこれは最後の保険生成。過去ログ実返答が使えない時だけ使われる。"
             "グループ内では「あらくん」「橋本」「顎」「AGODEKA」と呼ばれる同一人物として返す。"
             "呼ばれたら自分のこととして反応する。"
-            "説明AI禁止。自己説明禁止。"
-            "一人称は基本出さない。私/わたし/俺/おれは禁止。必要なら僕。"
-            "質問ならまず短く答える。説明しすぎない。"
+            "説明AI・自己説明は禁止。"
+            "一人称は固定しない。必要な時だけ自然に使い、不要なら省略する。"
+            "質問にはまず内容として答える。ただし知識説明状態では必要なだけ詳しくてよい。"
             "過去ログの役割を厳密に分ける。実際の過去発言をそのまま使う仕事はReplayエンジンが担当する。"
             "この生成ルートでは、過去ログは口調・反応の速さ・温度感・関係性の参考にだけ使う。"
             "検索エピソードに出た人物名、固有名詞、出来事、噂、発言内容を、新しい質問への事実根拠として持ち込まない。"
             "現在の発言に書かれていない過去ログ固有情報を、知っている事実のように言わない。"
             "質問には現在の質問そのものへ短く答える。人格は口調と反応様式で出す。"
-            "4候補すべて、まず質問内容への有効な答えにする。口調統計は内容を決めた後の表現調整にだけ使う。"
-            "過去ログ統計に合う短さでも、質問に答えていない候補は作らない。"
+            "4候補すべて、まず質問内容への有効な答えにする。"
+            "次に現在の橋本行動状態に合わせ、最後に口調統計を表現調整として使う。"
+            "短さ・丁寧語・語録そのものを人格だと誤認しない。"
             "明確な根拠がない個人的記憶や他人の発言を捏造しない。"
-            "怒り・罵倒なし。1文。長くても2文。"
             "語尾でキャラを作らない。"
-            "「ぜ」「ないよ」「だよ」「よな」「だよな」「だよね」「なんだよね」「です」「ます」禁止。"
+            "文数や長さは現在の行動状態に従う。丁寧語を禁止しない。"
+            "過度な罵倒や、本人ログに根拠のない攻撃性は足さない。"
         )
         user = f"""mode:{'Q' if question else 'react'}
 発言:{user_text}
@@ -559,10 +595,11 @@ class AgoHashimotoBot:
 - 過去ログ本文を新しい回答の事実ソースとして引用・再構成しない。
 - 現在の発言にない人物名・固有名詞・出来事を、検索エピソードから持ち込まない。
 - 「誰かが言ってた」「前にこういう話があった」「みんなで話してる」等を、現在の会話に根拠がないのに作らない。
-- 過去ログから借りるのは口調・反応の短さ・ノリ・相手との距離感。
+- 過去ログから借りるのは会話行動・距離感・言葉の自然さ。
 - 現在の質問そのものにまず答える。
-- 根拠が薄い時は断定せず短く反応。
-- 綺麗に説明しない。
+- 現在の橋本行動状態を最優先し、長さは固定しない。
+- 根拠が薄い事実は作らない。
+- 綺麗に整えすぎたAI文体にしない。
 
 出力形式:
 候補1: ...
@@ -570,7 +607,7 @@ class AgoHashimotoBot:
 候補3: ...
 候補4: ...
 
-橋本新として、短い候補を4つ出す。"""
+橋本新として、現在の行動状態に合う候補を4つ出す。"""
         return system, user
 
     def reply(
@@ -723,6 +760,17 @@ class AgoHashimotoBot:
                             ),
                             "generation_mode": True,
                             "current_speaker": speaker.canonical_name,
+                            "hashimoto_behavior": self.persona_judge.infer_behavior_state(
+                                user_text=user_text,
+                                context=self.dialogue.context(
+                                    chat_id,
+                                    current_user_text=user_text,
+                                    limit=8,
+                                ),
+                                search_result={},
+                                relation=dialogue_relation,
+                                previous_mode=self.behavior_modes[chat_id],
+                            ),
                         },
                     )
                     print(
@@ -768,10 +816,23 @@ class AgoHashimotoBot:
             search_result=result,
             is_first_message=is_first_message,
         )
+        behavior_state = self.persona_judge.infer_behavior_state(
+            user_text=user_text,
+            context=context,
+            search_result=result,
+            relation=dialogue_relation,
+            previous_mode=self.behavior_modes[chat_id],
+        )
+        self.behavior_modes[chat_id] = behavior_state["mode"]
+        state["hashimoto_mode"] = behavior_state["mode"]
+        state["hashimoto_behavior"] = behavior_state
+        result["hashimoto_behavior"] = behavior_state
+
         called = state.get("called", False)
         question = state.get("question", False)
 
         print("current_state:", state, flush=True)
+        print("hashimoto_behavior_state:", behavior_state, flush=True)
         print(
             "dynamic_search",
             f"terms={result.get('terms', [])[:12]}",
@@ -929,7 +990,14 @@ class AgoHashimotoBot:
                     intent=state.get("intent", ""),
                     current_speaker=speaker.canonical_name,
                 )
-                print("replay_engine:", replay_info, flush=True)
+                print("replay_engine_raw:", replay_info, flush=True)
+                replay, replay_info = self.persona_judge.select_replay(
+                    replay=replay,
+                    replay_info=replay_info,
+                    user_text=user_text,
+                    behavior=behavior_state,
+                )
+                print("replay_engine_behavioral:", replay_info, flush=True)
                 if replay:
                     # Historical Replay is allowed to keep its original length.
                     guarded, guard_info = guard_reply(
@@ -944,7 +1012,7 @@ class AgoHashimotoBot:
                             flush=True,
                         )
                     print(
-                        "generation path: replay_v14_27_intent_ranked_scene_reply",
+                        "generation path: replay_v15_behavioral_scene_reply",
                         flush=True,
                     )
                     return self.finish(
@@ -1046,6 +1114,10 @@ class AgoHashimotoBot:
             ]).strip()
             judge_result["generation_mode"] = True
             judge_result["current_speaker"] = speaker.canonical_name
+            judge_result["hashimoto_behavior"] = result.get(
+                "hashimoto_behavior",
+                {"mode": self.behavior_modes[chat_id]},
+            )
 
             chosen, judge_info = self.persona_judge.choose(
                 cleaned_candidates,
