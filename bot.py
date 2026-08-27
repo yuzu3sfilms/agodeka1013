@@ -118,6 +118,12 @@ class AgoHashimotoBot:
         # v14.45: one in-flight turn per chat. LINE can deliver rapid messages on
         # separate request threads; shared history/ellipsis state must never interleave.
         self.chat_locks = defaultdict(threading.RLock)
+        # v14.46: conversation ownership. In a group, a follow-up belongs to AGO
+        # only when AGO was actually talking to the same sender, or AGO is called
+        # explicitly. This prevents unrelated group chatter from entering the
+        # continuity route just because it is short/elliptical.
+        self.last_ago_partner = defaultdict(str)
+        self.pending_turn_partner = defaultdict(str)
 
         self.continuity_seconds = int(os.environ.get("CONTINUITY_SECONDS", "420"))
         self.continuity_min_history = int(os.environ.get("CONTINUITY_MIN_HISTORY", "1"))
@@ -207,16 +213,19 @@ class AgoHashimotoBot:
         resolved = self.relationship_evidence.resolve_alias(t)
         return t if resolved else None
 
-    def _semantic_user_text(self, chat_id: str, user_text: str):
-        """Expand only chained person-opinion ellipsis; preserve the visible user text."""
+    def _semantic_user_text(
+        self, chat_id: str, user_text: str, partner_key: str = ""
+    ):
+        """Expand person-opinion ellipsis only within the same speaker's chain."""
         t = (user_text or "").strip()
+        chain_key = (chat_id, partner_key or "__unknown__")
         explicit = self._explicit_person_opinion_question(t)
         if explicit:
-            self.person_opinion_chain[chat_id] = True
+            self.person_opinion_chain[chain_key] = True
             return t, {"expanded": False, "reason": "explicit_person_opinion"}
 
         subject = self._short_person_subject(t)
-        if self.person_opinion_chain[chat_id] and subject:
+        if self.person_opinion_chain[chain_key] and subject:
             expanded = f"{subject}のことどう思ってる？"
             return expanded, {
                 "expanded": True,
@@ -227,7 +236,7 @@ class AgoHashimotoBot:
 
         # A normal substantive turn ends this narrow inheritance mode.
         if t and not re.fullmatch(r"(?:うん|はい|へえ|ほう|なるほど|草|笑|ｗ+|w+)", t, re.I):
-            self.person_opinion_chain[chat_id] = False
+            self.person_opinion_chain[chain_key] = False
         return t, {"expanded": False, "reason": "no_person_opinion_inheritance"}
 
     def remember_user(self, chat_id: str, text: str):
@@ -244,11 +253,66 @@ class AgoHashimotoBot:
         return self.dialogue.context(chat_id, current_user_text=user_text, limit=8)
 
     def finish(self, chat_id: str, user_text: str, answer: str | None) -> str | None:
-        """All routes update the same role-labelled conversation history."""
+        """All routes update history; only real AGO replies establish ownership."""
         self.remember_user(chat_id, user_text)
         if answer:
             self.remember_bot(chat_id, answer)
+            partner = self.pending_turn_partner.get(chat_id, "")
+            if partner:
+                self.last_ago_partner[chat_id] = partner
         return answer
+
+    @staticmethod
+    def _partner_key(sender_id: str | None, sender_display_name: str | None) -> str:
+        return (sender_id or "").strip() or (sender_display_name or "").strip()
+
+    def _turn_directed_to_ago(
+        self,
+        chat_id: str,
+        user_text: str,
+        sender_id: str | None,
+        sender_display_name: str | None,
+        relation: dict | None = None,
+    ) -> tuple[bool, str]:
+        """Resolve conversational ownership before continuity/generation.
+
+        DM turns are directed by definition. In groups/rooms, ordinary chatter is
+        not directed to AGO merely because it is a question or an ellipsis.
+        Ownership requires an explicit call or an active same-speaker exchange
+        after a real AGO reply.
+        """
+        if not self._is_group_or_room(chat_id):
+            return True, "direct_message"
+        if self.called_directly(user_text):
+            return True, "explicit_call"
+
+        partner = self._partner_key(sender_id, sender_display_name)
+        if (
+            partner
+            and partner == self.last_ago_partner.get(chat_id, "")
+            and self.is_conversation_continuing(chat_id)
+        ):
+            rel = (relation or {}).get("relation", "")
+            if rel in {"followup", "continuation_request", "repair_request"}:
+                return True, "same_partner_followup"
+            if self.is_question(user_text):
+                return True, "same_partner_question"
+
+        return False, "undirected_group_turn"
+
+    def _continuity_owned(
+        self,
+        chat_id: str,
+        relation: dict,
+        directed_to_ago: bool,
+    ) -> bool:
+        if relation.get("relation") not in {
+            "repair_request", "followup", "continuation_request"
+        }:
+            return False
+        if not self._is_group_or_room(chat_id):
+            return True
+        return bool(directed_to_ago)
 
     def continuity_prompt(self, user_text: str, chat_id: str, relation: dict, speaker: SpeakerProfile):
         history = self.dialogue.context(chat_id, current_user_text=user_text, limit=8)
@@ -368,6 +432,7 @@ class AgoHashimotoBot:
         speaker: SpeakerProfile,
         dialogue_relation: dict,
         is_first_message: bool,
+        directed_to_ago: bool = False,
     ) -> dict:
         """
         Decide whether AGO joins an undirected group conversation.
@@ -394,21 +459,26 @@ class AgoHashimotoBot:
             "replay_info": None,
         }
 
-        if not self.spontaneous_enabled:
-            return {**base, "reason": "disabled"}
         if not self._is_group_or_room(chat_id):
             return {**base, "reason": "not_group"}
-        if is_first_message:
-            return {**base, "reason": "first_message"}
-        if state.get("called") or state.get("question"):
-            return {**base, "reason": "direct_or_question"}
-        if dialogue_relation.get("relation") not in {"new_topic", "topic_shift"}:
-            return {**base, "reason": "continuation_or_followup"}
+        if directed_to_ago:
+            return {**base, "reason": "directed_to_ago"}
 
-        # This is an undirected group statement: from here on, spontaneous
-        # participation owns the reply/silence decision.
+        # Every undirected group/room turn is owned by this gate even when
+        # spontaneous participation is disabled. Otherwise disabling spontaneous
+        # mode accidentally falls through to normal automatic reply routing.
         base["gate"] = True
+        if not self.spontaneous_enabled:
+            return {**base, "reason": "disabled_undirected_group"}
 
+        # Questions, ellipses and first observed messages are not direct merely
+        # because they look reply-worthy.
+        if is_first_message:
+            return {**base, "reason": "undirected_first_message"}
+        if dialogue_relation.get("relation") in {
+            "followup", "continuation_request", "repair_request"
+        }:
+            return {**base, "reason": "unowned_followup"}
         if len(self.histories[chat_id]) < self.spontaneous_min_history:
             return {**base, "reason": "not_enough_group_history"}
 
@@ -789,6 +859,9 @@ Opinion Evidence:
     ) -> str | None:
         is_first_message = chat_id not in self.seen_chats
         self.seen_chats.add(chat_id)
+        self.pending_turn_partner[chat_id] = self._partner_key(
+            sender_id, sender_display_name
+        )
 
         context = self.context(chat_id, user_text)
         print(
@@ -816,7 +889,9 @@ Opinion Evidence:
             flush=True,
         )
 
-        semantic_user_text, semantic_resolution = self._semantic_user_text(chat_id, user_text)
+        semantic_user_text, semantic_resolution = self._semantic_user_text(
+            chat_id, user_text, self.pending_turn_partner.get(chat_id, "")
+        )
         print("semantic_resolution:", semantic_resolution, flush=True)
 
         # v14.45 canonical person context is resolved BEFORE dialogue/search.
@@ -836,8 +911,30 @@ Opinion Evidence:
             dialogue_relation["resolved_subject"] = person_context.get("canonical", "")
             dialogue_relation["subject_inherited"] = False
         print("dialogue_relation:", dialogue_relation, flush=True)
+        directed_to_ago, directed_reason = self._turn_directed_to_ago(
+            chat_id,
+            semantic_user_text,
+            sender_id,
+            sender_display_name,
+            dialogue_relation,
+        )
+        dialogue_relation["directed_to_ago"] = directed_to_ago
+        dialogue_relation["directed_reason"] = directed_reason
+        print(
+            "conversation_ownership:",
+            {
+                "directed_to_ago": directed_to_ago,
+                "reason": directed_reason,
+                "partner": self.pending_turn_partner.get(chat_id, ""),
+                "last_ago_partner": self.last_ago_partner.get(chat_id, ""),
+            },
+            flush=True,
+        )
 
         if self.is_shutdown(chat_id):
+            if self._is_group_or_room(chat_id) and not directed_to_ago:
+                print("generation path: shutdown_undirected_group_silence", flush=True)
+                return self.finish(chat_id, user_text, None)
             wake, reason = self.should_wake_from_shutdown(user_text)
             print(
                 "shutdown_state:",
@@ -882,7 +979,9 @@ Opinion Evidence:
             {k: v for k, v in training.items() if k != "answer"},
             flush=True,
         )
-        if training.get("used"):
+        if training.get("used") and (
+            not self._is_group_or_room(chat_id) or directed_to_ago
+        ):
             answer = training["answer"]
             intent = training.get("intent") or {}
             if intent.get("intent") == "log_workout":
@@ -897,12 +996,15 @@ Opinion Evidence:
                 flush=True,
             )
             return self.finish(chat_id, user_text, answer)
+        elif training.get("used"):
+            print(
+                "training_advisor_skip: undirected_group_turn",
+                flush=True,
+            )
 
-        if dialogue_relation.get("relation") in {
-            "repair_request",
-            "followup",
-            "continuation_request",
-        }:
+        if self._continuity_owned(
+            chat_id, dialogue_relation, directed_to_ago
+        ):
             if self.groq_available():
                 try:
                     system, user = self.continuity_prompt(
@@ -1099,6 +1201,7 @@ Opinion Evidence:
             speaker=speaker,
             dialogue_relation=dialogue_relation,
             is_first_message=is_first_message,
+            directed_to_ago=directed_to_ago,
         )
         print(
             "spontaneous_participation:",
