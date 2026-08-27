@@ -512,17 +512,6 @@ class PersonaJudge:
         """
         behavior = behavior or {}
 
-        # v14.39: semantic completeness guard.
-        # Run only after local `behavior` has been initialized.
-        qsem = (behavior or {}).get("question_semantics", {}) if isinstance(behavior, dict) else {}
-        required_semantics = qsem.get("required", "")
-
-        if DANGLING_DEICTIC_RE.search(c):
-            return -999, ["semantic_incomplete:dangling_deictic"]
-
-        if required_semantics == "personal_evaluation":
-            if "ざっくり言えばそう" in c or re.search(r"(?:だけど|けど)[、 ]*そうだ[。！？]?$", c):
-                return -999, ["semantic_incomplete:opinion_missing_evaluation"]
         search_result = search_result or {}
         family = behavior.get("question_family", self.question_family(user_text))
         if family not in {"opinion", "preference", "experience"}:
@@ -1345,6 +1334,17 @@ class PersonaJudge:
             or search_result.get("hashimoto_opinion_evidence")
             or {}
         )
+
+        # v14.40: semantic completeness belongs in candidate scoring, where
+        # both candidate text (`c`) and question semantics are available.
+        required_semantics = question_semantics.get("required", "")
+        if DANGLING_DEICTIC_RE.search(c):
+            return -999, ["semantic_incomplete:dangling_deictic"]
+        if required_semantics == "personal_evaluation":
+            if "ざっくり言えばそう" in c or re.search(
+                r"(?:だけど|けど)[、 ]*そうだ[。！？]?$", c
+            ):
+                return -999, ["semantic_incomplete:opinion_missing_evaluation"]
 
         # Direct-answer questions must not be turned back into a new question.
         # A rhetorical answer such as 「たぶんいるんじゃない？」 is allowed
