@@ -33,6 +33,7 @@ import os
 import random
 import re
 import time
+import threading
 from collections import defaultdict, deque
 
 from openai import OpenAI
@@ -114,6 +115,9 @@ class AgoHashimotoBot:
         self.person_opinion_chain = defaultdict(bool)
         self.seen_chats = set()
         self.shutdown_store = ShutdownStateStore()
+        # v14.45: one in-flight turn per chat. LINE can deliver rapid messages on
+        # separate request threads; shared history/ellipsis state must never interleave.
+        self.chat_locks = defaultdict(threading.RLock)
 
         self.continuity_seconds = int(os.environ.get("CONTINUITY_SECONDS", "420"))
         self.continuity_min_history = int(os.environ.get("CONTINUITY_MIN_HISTORY", "1"))
@@ -266,6 +270,7 @@ class AgoHashimotoBot:
             behavior=behavior,
             current_speaker=speaker.canonical_name,
             relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
+            person_context=relation.get("person_context") or {},
         )
         relationship_evidence_block = self.relationship_evidence.format(relationship_evidence)
         system = (
@@ -289,6 +294,11 @@ class AgoHashimotoBot:
 
 過去ログ統計:
 {persona_guidance}
+
+人物関係資料:
+{relationship_evidence_block}
+
+人物関係資料がある対象では、その人物IDと実ログを優先する。別名の意味を聞き返さず、資料があるのに「分からない」「微妙」「別に」だけで逃げない。
 
 直前の流れに自然につながる返答候補を4つ。
 候補1: ...
@@ -481,13 +491,13 @@ class AgoHashimotoBot:
             "relevance": relevance,
         }
 
-    def fallback_prompt(self, user_text: str, context: str, chat_id: str, question: bool, speaker: SpeakerProfile):
+    def fallback_prompt(self, user_text: str, context: str, chat_id: str, question: bool, speaker: SpeakerProfile, person_context: dict | None = None):
         relation_style = "\n".join(self.relationships.style_samples(n=4))
         behavior = self.persona_judge.infer_behavior_state(
             user_text=user_text,
             context=context,
             search_result={},
-            relation={},
+            relation={"person_context": person_context or {}},
             previous_mode=self.behavior_modes[chat_id],
         )
         persona_guidance = self.persona_judge.generation_guidance(
@@ -500,6 +510,7 @@ class AgoHashimotoBot:
             behavior=behavior,
             current_speaker=speaker.canonical_name,
             relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
+            person_context=person_context or {},
         )
         relationship_evidence_block = self.relationship_evidence.format(relationship_evidence)
         system = (
@@ -512,7 +523,8 @@ class AgoHashimotoBot:
             "普通の会話では普通に答える。丁寧語も必要なら自然に使う。"
             "人物への意見質問では人物関係資料を優先し、実際の会話量・距離感・反応様式を使う。"
             "人物関係資料があっても、記録にない好き嫌い・内面評価は作らない。"
-            "関係資料が十分ある相手に、根拠なく『分からない』『別に』だけで逃げない。"
+            "関係資料が十分ある相手に、根拠なく『分からない』『別に』『微妙』だけで逃げない。"
+            "Opinion Evidenceがnoneでも人物関係資料がある場合は、低コミットメント逃避より実ログの具体情報を優先する。"
         )
         user = f"""mode:{'Q' if question else 'continue'}
 発言:{user_text}
@@ -648,6 +660,7 @@ class AgoHashimotoBot:
             behavior=behavior,
             current_speaker=speaker.canonical_name,
             relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
+            person_context=search_result.get("person_context") or {},
         )
         relationship_evidence_block = self.relationship_evidence.format(relationship_evidence)
         system = (
@@ -668,7 +681,8 @@ class AgoHashimotoBot:
             "質問対象がAGO自身なら、ユーザー側へ質問を反転しない。Realityを守ったうえで自分についてまず答える。"
             "現在のStanceがpersonal_hunchなら、証拠や一般論の解説より先に本人としての傾きを出す。"
             "現在のStanceがpersonal_evaluationなら、抽象論ではなく本人の評価・感想として答える。"
-            "Opinion Evidenceがnoneなら、対象への強い好き嫌い・怖さ・面白さを橋本の新しい価値観として捏造しない。別に、分からない、なんとも等の低コミットメントを優先する。"
+            "Opinion Evidenceがnoneなら、対象への強い好き嫌い・怖さ・面白さを橋本の新しい価値観として捏造しない。"
+            "ただし人物関係資料がある対象では『別に・分からない・微妙』を優先せず、本人の実発言と実会話から具体的に言える範囲を答える。"
             "Opinion Evidenceがdirectなら、その方向と過去発言の範囲を守る。"
             "人物への評価質問では人物関係資料を使う。対象人物との実際の隣接会話・行動傾向から距離感と反応様式を再現する。"
             "人物関係資料は好き嫌いを自動推定する許可ではない。記録にない内面評価は捏造しない。"
@@ -759,6 +773,20 @@ Opinion Evidence:
         sender_id: str | None = None,
         sender_display_name: str | None = None,
     ) -> str | None:
+        """Serialize the complete stateful turn per chat."""
+        with self.chat_locks[chat_id]:
+            return self._reply_unlocked(
+                chat_id, user_text, sender_id=sender_id,
+                sender_display_name=sender_display_name,
+            )
+
+    def _reply_unlocked(
+        self,
+        chat_id: str,
+        user_text: str,
+        sender_id: str | None = None,
+        sender_display_name: str | None = None,
+    ) -> str | None:
         is_first_message = chat_id not in self.seen_chats
         self.seen_chats.add(chat_id)
 
@@ -790,7 +818,23 @@ Opinion Evidence:
 
         semantic_user_text, semantic_resolution = self._semantic_user_text(chat_id, user_text)
         print("semantic_resolution:", semantic_resolution, flush=True)
+
+        # v14.45 canonical person context is resolved BEFORE dialogue/search.
+        # Every downstream layer receives this same person_id instead of re-guessing aliases.
+        person_context = self.relationship_evidence.resolve_context(
+            semantic_user_text, current_speaker=speaker.canonical_name
+        )
+        search_user_text = self.relationship_evidence.search_text(
+            semantic_user_text, person_context
+        )
+        print("person_context:", person_context, flush=True)
+        print("person_search_text:", search_user_text, flush=True)
+
         dialogue_relation = self.dialogue.classify(chat_id, semantic_user_text)
+        dialogue_relation["person_context"] = person_context
+        if person_context.get("used") and person_context.get("kind") != "user_self":
+            dialogue_relation["resolved_subject"] = person_context.get("canonical", "")
+            dialogue_relation["subject_inherited"] = False
         print("dialogue_relation:", dialogue_relation, flush=True)
 
         if self.is_shutdown(chat_id):
@@ -944,13 +988,15 @@ Opinion Evidence:
             )
             return self.finish(chat_id, user_text, answer)
 
-        raw_result = self.searcher.search(semantic_user_text)
+        raw_result = self.searcher.search(search_user_text)
         result = self.ranker.rerank(
-            semantic_user_text,
+            search_user_text,
             raw_result,
             max_selected=2,
         )
         result["inherited_topic"] = False
+        result["person_context"] = person_context
+        result["search_user_text"] = search_user_text
 
         state = self.current_state.classify(
             user_text=semantic_user_text,
@@ -986,12 +1032,14 @@ Opinion Evidence:
             behavior=behavior_state,
             current_speaker=speaker.canonical_name,
             relationship_policy=(getattr(self.persona_judge.persona_policy, "profile", {}) or {}).get("relationship_policy", {}),
+            person_context=person_context,
         )
         result["relationship_evidence"] = relationship_evidence
         state["relationship_evidence"] = relationship_evidence
         result["semantic_user_text"] = semantic_user_text
         state["semantic_user_text"] = semantic_user_text
         state["semantic_resolution"] = semantic_resolution
+        state["person_context"] = person_context
 
         called = state.get("called", False)
         question = state.get("question", False)
@@ -1240,6 +1288,7 @@ Opinion Evidence:
                     chat_id,
                     question,
                     speaker,
+                    person_context=result.get("person_context", {}),
                 )
             else:
                 system, user = self.build_prompt(
@@ -1309,6 +1358,7 @@ Opinion Evidence:
                 judge_result["hashimoto_behavior"].get("opinion_evidence", {}),
             )
             judge_result["relationship_evidence"] = result.get("relationship_evidence", {})
+            judge_result["person_context"] = result.get("person_context", {})
 
             chosen, judge_info = self.persona_judge.choose(
                 cleaned_candidates,
@@ -1325,6 +1375,7 @@ Opinion Evidence:
                 retry_system = system + (
                     " 前回候補はjudgeで不十分と判定された。今度は指摘を修正する。"
                     " 人物関係資料がある場合はその実際の関係を使い、一般論や無難な逃げにしない。"
+                    " 対象人物IDは前処理済みなので、別名の意味を聞き返したり別人として再解釈しない。"
                     " 観測シグナルがあるなら、そのうち少なくとも1つを返答内容に具体的に反映する。"
                     " 『微妙』『別に』『まあかな』だけで終わらせない。"
                     " ただし資料にない好き嫌い・感情・出来事は発明しない。"

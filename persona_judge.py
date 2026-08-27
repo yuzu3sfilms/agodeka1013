@@ -502,6 +502,16 @@ class PersonaJudge:
                 "reason": "user_first_person_reference",
             }
 
+        # v14.45: person identity is resolved once in bot.py before behavior inference.
+        # Never re-interpret a nickname independently at this layer.
+        person_context = relation.get("person_context") or {}
+        if person_context.get("used") and person_context.get("canonical"):
+            return {
+                "subject_role": "external",
+                "subject": person_context.get("canonical"),
+                "reason": "canonical_person_context",
+            }
+
         if inherited and resolved:
             return {
                 "subject_role": "inherited_external",
@@ -1441,11 +1451,18 @@ class PersonaJudge:
                         c,
                     ))
                     signals = relationship_evidence.get("signals") or []
+                    direct_mentions = relationship_evidence.get("direct_mentions") or []
+                    examples = relationship_evidence.get("examples") or []
                     if generic_relation_evasion:
+                        # This is not a style preference. If we have real corpus material
+                        # about the person, "微妙/わからない/別に" throws away evidence.
+                        # Hard-reject it so selection cannot silently choose the evasion.
+                        if direct_mentions or len(examples) >= 2:
+                            return -999, ["relationship_evidence_hard_reject:generic_evasion"]
                         score -= 58 if signals else 36
                         reasons.append("relationship_evidence_underused:generic_evasion")
                     else:
-                        score += 12 if signals else 8
+                        score += 16 if direct_mentions else (12 if signals else 8)
                         reasons.append("relationship_evidence_available")
 
         if (
