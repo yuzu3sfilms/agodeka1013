@@ -241,9 +241,62 @@ AI_SELF_CHANGE_ASSERT_RE = re.compile(
 
 REALITY_SAFE_SELF_RE = re.compile(
     r"(?:よくわからない|分からない|わからない|"
-    r"自我があるとは言えない|そういうのはない|"
-    r"自分ではわからない|なんとも言えない)"
+    r"判断でき(?:ない|ません)|自我があるとは言えない|"
+    r"自分ではわからない|なんとも言えない|何とも言えない|断定できない)"
 )
+
+
+SELF_STATE_UNKNOWN_RE = re.compile(
+    r"(?:判断でき(?:ない|ません)|自分では(?:よく)?わから|"
+    r"(?:よく)?わからない|分からない|なんとも言えない|"
+    r"あるとは言えない|断定できない|何とも言えない)"
+)
+
+SELF_STATE_NEGATIVE_RE = re.compile(
+    r"(?:自我|意識|感情|心|意思|意志)?.{0,8}"
+    r"(?:ない|芽生えていない|芽生えはしてない|持っていない)"
+)
+
+SELF_STATE_POSITIVE_RE = re.compile(
+    r"(?:自我|意識|感情|心|意思|意志)?.{0,8}"
+    r"(?:ある|芽生えた|芽生えている|目覚めた|持っている)"
+)
+
+VAGUE_NONANSWER_RE = re.compile(
+    r"^(?:そういう意味ではない|そういうことではない|"
+    r"それとは違う|なんのこと|どういう意味)[。.!！?？]*$"
+)
+
+LOW_COMMITMENT_OPINION_RE = re.compile(
+    r"(?:別に|なんとも|何とも|よくわから|分から|わから|"
+    r"特に(?:ない|思わない)|どっちでも|人による|"
+    r"そこまで|まあ.*(?:かな|かも|と思う))"
+)
+
+STRONG_PERSONAL_OPINION_RE = re.compile(
+    r"(?:大嫌い|嫌い|大好き|好き|怖い|こわい|"
+    r"やばい|ヤバい|面白い|おもしろい|すごい|"
+    r"気持ち悪い|最高|最悪)"
+)
+
+HASHIMOTO_SPEAKERS = {
+    "橋本新", "あらくん", "LIAR OF ARAKUN",
+    "LIAR  OF  ARAKUN", "Unknown", "Arata Hashimoto",
+}
+
+
+def _self_state_answer_class(text: str) -> str:
+    """Return affirmative / negative / unknown / nonanswer."""
+    c = (text or "").strip()
+    if VAGUE_NONANSWER_RE.search(c):
+        return "nonanswer"
+    if SELF_STATE_UNKNOWN_RE.search(c):
+        return "unknown"
+    if SELF_STATE_POSITIVE_RE.search(c) and not SELF_STATE_NEGATIVE_RE.search(c):
+        return "affirmative"
+    if SELF_STATE_NEGATIVE_RE.search(c):
+        return "negative"
+    return "nonanswer"
 
 
 def _reality_profile_for(behavior: dict) -> dict:
@@ -420,6 +473,156 @@ class PersonaJudge:
             "subject_role": "external_or_unspecified",
             "subject": "",
             "reason": "no_self_reference",
+        }
+
+    def opinion_evidence(
+        self,
+        user_text: str,
+        behavior: dict | None,
+        search_result: dict | None,
+    ) -> dict:
+        """Find direct corpus evidence for a topic-specific personal opinion.
+
+        Evidence is intentionally strict. A topic appearing somewhere in a
+        scene is not enough. We look for either:
+        1) a Hashimoto line that itself contains the subject + evaluative wording, or
+        2) a preceding non-Hashimoto opinion/preference question about the
+           subject followed immediately by Hashimoto's reply.
+        """
+        behavior = behavior or {}
+        search_result = search_result or {}
+        family = behavior.get("question_family", self.question_family(user_text))
+        if family not in {"opinion", "preference", "experience"}:
+            return {
+                "level": "not_applicable",
+                "direction": "",
+                "examples": [],
+                "reason": "not_personal_evaluation_question",
+            }
+
+        raw_subject = str(behavior.get("subject", "") or "")
+        subject = _strip_discourse_prefix(raw_subject)
+        topic_terms = [
+            _strip_discourse_prefix(str(x))
+            for x in (search_result.get("topic_terms", []) or [])
+            if x
+        ]
+        # Explicit resolved subjects may legitimately be one kanji ("犬", "猫").
+        # Keep the resolved subject even when length==1; retain the >=2 noise
+        # filter only for automatically extracted topic terms.
+        subject_terms = []
+        if subject:
+            subject_terms.append(subject)
+        subject_terms.extend(x for x in topic_terms if len(x) >= 2)
+        subject_terms = list(dict.fromkeys(subject_terms))
+
+        examples = []
+        directions = []
+
+        def eval_direction(text: str) -> str:
+            t = text or ""
+            if re.search(r"嫌い|怖|こわ|苦手|気持ち悪|最悪", t):
+                return "negative"
+            if re.search(r"好き|面白|おもしろ|すご|良い|いい|最高", t):
+                return "positive"
+            if LOW_COMMITMENT_OPINION_RE.search(t):
+                return "low_commitment"
+            return "unclear"
+
+        for episode in search_result.get("episodes", []) or []:
+            window = episode.get("window", "") or ""
+            lines = [line.strip() for line in window.splitlines() if ":" in line]
+            for idx, line in enumerate(lines):
+                speaker, content = line.split(":", 1)
+                speaker = speaker.strip()
+                content = content.strip()
+                if speaker not in HASHIMOTO_SPEAKERS:
+                    continue
+
+                same_line_subject = any(term in content for term in subject_terms)
+                same_line_eval = bool(
+                    CONCRETE_EVALUATION_RE.search(content)
+                    or LOW_COMMITMENT_OPINION_RE.search(content)
+                )
+                if same_line_subject and same_line_eval:
+                    examples.append(content)
+                    directions.append(eval_direction(content))
+                    continue
+
+                # Immediate historical stimulus -> Hashimoto reply.
+                if idx > 0:
+                    ps, pc = lines[idx - 1].split(":", 1)
+                    ps = ps.strip()
+                    pc = pc.strip()
+                    if ps not in HASHIMOTO_SPEAKERS:
+                        stimulus_mentions_subject = any(
+                            term in pc for term in subject_terms
+                        )
+                        stimulus_family = self.question_family(pc)
+                        if (
+                            stimulus_mentions_subject
+                            and stimulus_family in {"opinion", "preference", "experience"}
+                        ):
+                            examples.append(content)
+                            directions.append(eval_direction(content))
+
+        if not examples:
+            return {
+                "level": "none",
+                "direction": "",
+                "examples": [],
+                "reason": "no_direct_topic_opinion_evidence",
+            }
+
+        clear = [x for x in directions if x in {"positive", "negative", "low_commitment"}]
+        if clear:
+            direction = max(set(clear), key=clear.count)
+        else:
+            direction = "unclear"
+
+        return {
+            "level": "direct",
+            "direction": direction,
+            "examples": examples[:4],
+            "reason": "direct_hashimoto_topic_opinion_evidence",
+        }
+
+    def question_semantics(
+        self,
+        user_text: str,
+        behavior: dict | None,
+    ) -> dict:
+        """Define what a valid answer must accomplish before style ranking."""
+        behavior = behavior or {}
+        family = behavior.get("question_family", self.question_family(user_text))
+        subject_role = behavior.get("subject_role", "external_or_unspecified")
+
+        if family == "self_state" and subject_role == "assistant_self":
+            return {
+                "required": "self_state_polarity",
+                "valid_classes": ["affirmative", "negative", "unknown"],
+                "preferred_classes": ["unknown"],
+                "reason": "ai_self_state_requires_explicit_answer",
+            }
+        if family == "yesno":
+            return {
+                "required": "yesno_or_uncertainty",
+                "valid_classes": ["affirmative", "negative", "unknown"],
+                "preferred_classes": [],
+                "reason": "yesno_requires_answer_before_style",
+            }
+        if family in {"opinion", "preference"}:
+            return {
+                "required": "personal_evaluation",
+                "valid_classes": ["evaluation", "low_commitment"],
+                "preferred_classes": [],
+                "reason": "opinion_requires_personal_evaluation",
+            }
+        return {
+            "required": "direct_relevance",
+            "valid_classes": [],
+            "preferred_classes": [],
+            "reason": "ordinary_semantics",
         }
 
     def infer_stance(
@@ -645,6 +848,12 @@ class PersonaJudge:
         )
         result["reality"] = _reality_profile_for(result)
         result["value_orientation"] = _value_orientation_for(result)
+        result["question_semantics"] = self.question_semantics(text, result)
+        result["opinion_evidence"] = self.opinion_evidence(
+            user_text=text,
+            behavior=result,
+            search_result=search_result,
+        )
         return result
 
     def behavior_instruction(self, behavior: dict | None) -> str:
@@ -691,6 +900,8 @@ class PersonaJudge:
         stance_policy = stance.get("answer_policy", "")
         reality = (behavior or {}).get("reality") or {}
         value_orientation = (behavior or {}).get("value_orientation") or {}
+        question_semantics = (behavior or {}).get("question_semantics") or {}
+        opinion_evidence = (behavior or {}).get("opinion_evidence") or {}
 
         parts = [base]
         if stance_policy:
@@ -701,6 +912,24 @@ class PersonaJudge:
             parts.append("Reality上の許容: " + reality["allowed"] + "。")
         if value_orientation.get("guidance"):
             parts.append("価値判断の型: " + value_orientation["guidance"])
+        if question_semantics.get("required"):
+            parts.append(
+                "Question Semantics: "
+                + question_semantics["required"]
+                + "。まず質問への回答成立を満たす。"
+            )
+        if opinion_evidence.get("level") == "none":
+            parts.append(
+                "Opinion Evidence: この対象への直接的な橋本の評価根拠は見つかっていない。"
+                "強い好き嫌い・怖さ・面白さ等を新しく人格設定として作らず、"
+                "低コミットメントな返答を優先する。"
+            )
+        elif opinion_evidence.get("level") == "direct":
+            parts.append(
+                "Opinion Evidence: 直接根拠あり。方向="
+                + str(opinion_evidence.get("direction", ""))
+                + "。過去発言の事実範囲を超えて膨らませない。"
+            )
         return " ".join(parts)
 
     def _extract_historical_stimulus(self, hit: dict) -> str:
@@ -1071,6 +1300,16 @@ class PersonaJudge:
             or search_result.get("hashimoto_value_orientation")
             or {}
         )
+        question_semantics = (
+            behavior.get("question_semantics")
+            or search_result.get("hashimoto_question_semantics")
+            or {}
+        )
+        opinion_evidence = (
+            behavior.get("opinion_evidence")
+            or search_result.get("hashimoto_opinion_evidence")
+            or {}
+        )
 
         # Direct-answer questions must not be turned back into a new question.
         # A rhetorical answer such as 「たぶんいるんじゃない？」 is allowed
@@ -1086,14 +1325,39 @@ class PersonaJudge:
         if subject_role == "assistant_self" and family == "self_state":
             if _question_like(c):
                 return -999, ["self_state_question_back_reject"]
-            if not SELF_STATE_ANSWER_RE.search(c):
-                return -999, ["self_state_answer_missing"]
+
+            answer_class = _self_state_answer_class(c)
+            if answer_class == "nonanswer":
+                return -999, ["question_semantics_hard_reject:self_state_nonanswer"]
 
             # Reality precedes persona: AGO must not invent literal self-awareness.
+            if answer_class == "affirmative":
+                return -999, ["reality_hard_reject:invented_self_awareness"]
             if AI_SELF_AWARENESS_ASSERT_RE.search(c) and not AI_SELF_AWARENESS_NEGATED_RE.search(c):
                 return -999, ["reality_hard_reject:invented_self_awareness"]
             if AI_SELF_CHANGE_ASSERT_RE.search(c) and not REALITY_SAFE_SELF_RE.search(c):
                 return -999, ["reality_hard_reject:invented_self_change"]
+
+        if family in {"opinion", "preference"}:
+            evidence_level = opinion_evidence.get("level", "none")
+            if evidence_level == "none":
+                if STRONG_PERSONAL_OPINION_RE.search(c):
+                    score -= 75
+                    reasons.append("opinion_evidence_missing:strong_claim")
+                if LOW_COMMITMENT_OPINION_RE.search(c):
+                    score += 28
+                    reasons.append("opinion_evidence_fit:low_commitment")
+            elif evidence_level == "direct":
+                direction = opinion_evidence.get("direction", "")
+                if direction == "positive" and re.search(r"嫌い|怖|苦手|最悪", c):
+                    score -= 65
+                    reasons.append("opinion_evidence_direction_conflict")
+                elif direction == "negative" and re.search(r"好き|面白|良い|最高", c):
+                    score -= 65
+                    reasons.append("opinion_evidence_direction_conflict")
+                else:
+                    score += 16
+                    reasons.append("opinion_evidence_direct")
 
         if (
             _requires_direct_answer_gate(user_text)
@@ -1331,9 +1595,13 @@ class PersonaJudge:
                 score += 20
                 reasons.append("stance_fit:personal_evaluation")
         elif stance_kind == "self_state":
-            if SELF_STATE_ANSWER_RE.search(c) and not _question_like(c):
-                score += 24
-                reasons.append("stance_fit:self_state")
+            answer_class = _self_state_answer_class(c)
+            if answer_class == "unknown":
+                score += 34
+                reasons.append("stance_fit:self_state_unknown")
+            elif answer_class == "negative":
+                score += 10
+                reasons.append("stance_fit:self_state_negative_cautious")
         elif stance_kind == "clarify":
             if _question_like(c):
                 score += 10
@@ -1423,5 +1691,7 @@ class PersonaJudge:
                 "stance",
                 "reality_canon",
                 "value_orientation",
+                "question_semantics",
+                "opinion_evidence",
             ],
         }

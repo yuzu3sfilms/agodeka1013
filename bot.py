@@ -557,11 +557,14 @@ class AgoHashimotoBot:
             "現在の発言に書かれていない過去ログ固有情報を、知っている事実のように言わない。"
             "質問には現在の質問そのものへ短く答える。人格は口調と反応様式で出す。"
             "4候補すべて、まず質問内容への有効な答えにする。"
-            "Reality/Canonを最優先する。人格を演じるためにAGO自身の自我・感情・意識・記憶などの事実を捏造しない。"
+            "Question Semanticsを最初に満たす。質問に答えていない候補は橋本らしくても作らない。"
+            "Reality/Canonを次に優先する。人格を演じるためにAGO自身の自我・感情・意識・記憶などの事実を捏造しない。"
             "質問対象がAGO自身なら、ユーザー側へ質問を反転しない。Realityを守ったうえで自分についてまず答える。"
             "現在のStanceがpersonal_hunchなら、証拠や一般論の解説より先に本人としての傾きを出す。"
             "現在のStanceがpersonal_evaluationなら、抽象論ではなく本人の評価・感想として答える。"
-            "価値判断は多様性・創造力・人間性などのLLM的な総論へ逃げず、具体的な好き嫌い・面白さ・怖さ・微妙さ・分からなさで返す。"
+            "Opinion Evidenceがnoneなら、対象への強い好き嫌い・怖さ・面白さを橋本の新しい価値観として捏造しない。別に、分からない、なんとも等の低コミットメントを優先する。"
+            "Opinion Evidenceがdirectなら、その方向と過去発言の範囲を守る。"
+            "価値判断は多様性・創造力・人間性などのLLM的な総論へ逃げず、具体的に返す。"
             "次に現在の橋本行動状態に合わせ、最後に口調統計を表現調整として使う。"
             "短さ・丁寧語・語録そのものを人格だと誤認しない。"
             "明確な根拠がない個人的記憶や他人の発言を捏造しない。"
@@ -596,6 +599,12 @@ Reality / Canon:
 
 橋本の価値判断の型:
 {behavior.get("value_orientation", {})}
+
+Question Semantics:
+{behavior.get("question_semantics", {})}
+
+Opinion Evidence:
+{behavior.get("opinion_evidence", {})}
 
 過去ログ:
 {episode_block}
@@ -847,10 +856,14 @@ Reality / Canon:
         state["hashimoto_stance"] = behavior_state.get("stance", {})
         state["hashimoto_reality"] = behavior_state.get("reality", {})
         state["hashimoto_value_orientation"] = behavior_state.get("value_orientation", {})
+        state["hashimoto_question_semantics"] = behavior_state.get("question_semantics", {})
+        state["hashimoto_opinion_evidence"] = behavior_state.get("opinion_evidence", {})
         result["hashimoto_behavior"] = behavior_state
         result["hashimoto_stance"] = behavior_state.get("stance", {})
         result["hashimoto_reality"] = behavior_state.get("reality", {})
         result["hashimoto_value_orientation"] = behavior_state.get("value_orientation", {})
+        result["hashimoto_question_semantics"] = behavior_state.get("question_semantics", {})
+        result["hashimoto_opinion_evidence"] = behavior_state.get("opinion_evidence", {})
 
         called = state.get("called", False)
         question = state.get("question", False)
@@ -862,6 +875,16 @@ Reality / Canon:
         print(
             "hashimoto_value_orientation:",
             behavior_state.get("value_orientation", {}),
+            flush=True,
+        )
+        print(
+            "hashimoto_question_semantics:",
+            behavior_state.get("question_semantics", {}),
+            flush=True,
+        )
+        print(
+            "hashimoto_opinion_evidence:",
+            behavior_state.get("opinion_evidence", {}),
             flush=True,
         )
         print(
@@ -1160,6 +1183,14 @@ Reality / Canon:
             judge_result["hashimoto_value_orientation"] = result.get(
                 "hashimoto_value_orientation",
                 judge_result["hashimoto_behavior"].get("value_orientation", {}),
+            )
+            judge_result["hashimoto_question_semantics"] = result.get(
+                "hashimoto_question_semantics",
+                judge_result["hashimoto_behavior"].get("question_semantics", {}),
+            )
+            judge_result["hashimoto_opinion_evidence"] = result.get(
+                "hashimoto_opinion_evidence",
+                judge_result["hashimoto_behavior"].get("opinion_evidence", {}),
             )
 
             chosen, judge_info = self.persona_judge.choose(
