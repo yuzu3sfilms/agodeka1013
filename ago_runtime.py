@@ -4,7 +4,7 @@ import glob
 import os
 import random
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 HASHIMOTO_NAMES = {
@@ -61,6 +61,18 @@ class DialogueState:
     turns: list[dict] = field(default_factory=list)
 
 
+@dataclass
+class PersonModel:
+    person_id: str
+    aliases: list[str] = field(default_factory=list)
+    interaction_count: int = 0
+    mention_count: int = 0
+    recurring_terms: list[str] = field(default_factory=list)
+    interaction_style_examples: list[dict] = field(default_factory=list)
+    direct_mention_examples: list[str] = field(default_factory=list)
+    evidence_strength: str = "none"
+
+
 class CorpusIndex:
     """Raw-log-backed identity, relationship and style store.
 
@@ -77,6 +89,7 @@ class CorpusIndex:
         self.hashimoto_lines: list[str] = []
         self.exchanges = defaultdict(list)
         self.direct_mentions = defaultdict(list)
+        self.person_models: dict[str, PersonModel] = {}
         self._load()
 
     def _candidate_files(self):
@@ -165,6 +178,7 @@ class CorpusIndex:
             self._parse(p)
         self._build_aliases()
         self._build_evidence()
+        self._build_person_models()
 
     def resolve_person(self, token: str, current_speaker: str = "") -> tuple[str, str]:
         raw = re.sub(r"^(?:じゃあ|で、?|なら|まあ|まぁ)\s*", "", token or "").strip(" \t、。！？?")
@@ -242,6 +256,69 @@ class CorpusIndex:
             if len(out) >= n:
                 break
         return out
+
+    @staticmethod
+    def _content_terms(texts, limit=10):
+        # Lightweight Japanese/ASCII topic hints. These are retrieval hints, not personality labels.
+        stop = {"これ","それ","あれ","ここ","そこ","どう","なんか","ちょっと","さん","くん","です","ます","ない","ある","いる","する","した","して","って","から","けど","ので","よう","こと","もの","俺","おれ","僕","私","橋本"}
+        c = Counter()
+        for text in texts:
+            for tok in re.findall(r"[A-Za-z0-9_]{3,}|[一-龥ァ-ヶー]{2,}|[ぁ-ん]{3,}", text or ""):
+                if tok.lower() in stop or tok in stop or len(tok) > 18:
+                    continue
+                c[tok] += 1
+        return [w for w,n in c.most_common(limit) if n >= 2]
+
+    def _build_person_models(self):
+        people = set(self.name_to_aliases) | set(self.exchanges) | set(self.direct_mentions)
+        for pid in people:
+            pairs = self.relationship_examples(pid, 40)
+            mentions = self.mentions(pid, 40)
+            n = len(self.exchanges.get(pid, []))
+            m = len(self.direct_mentions.get(pid, []))
+            volume = n + m
+            strength = "strong" if volume >= 30 else "medium" if volume >= 10 else "weak" if volume else "none"
+            topic_texts = []
+            for x in pairs:
+                topic_texts.extend([x.get("other", ""), x.get("hashimoto", "")])
+            topic_texts.extend(mentions)
+            self.person_models[pid] = PersonModel(
+                person_id=pid,
+                aliases=sorted(self.name_to_aliases.get(pid, {pid}), key=lambda x:(len(x),x))[:20],
+                interaction_count=n,
+                mention_count=m,
+                recurring_terms=self._content_terms(topic_texts),
+                interaction_style_examples=pairs[:12],
+                direct_mention_examples=mentions[:12],
+                evidence_strength=strength,
+            )
+
+    def person_model(self, target_id: str):
+        return self.person_models.get(target_id)
+
+    def person_model_for_prompt(self, target_id: str, query: str, n=8):
+        pm = self.person_model(target_id)
+        if not pm:
+            return None
+        # Rank the person's own evidence against the current utterance instead of
+        # taking whichever rows happen to be newest.
+        pair_scored = []
+        for x in self.relationship_examples(target_id, 60):
+            joined = (x.get("other", "") + " " + x.get("hashimoto", "")).strip()
+            pair_scored.append((self._score_line(query, joined), x))
+        pair_scored.sort(key=lambda z:z[0], reverse=True)
+        mention_scored = [(self._score_line(query, x), x) for x in self.mentions(target_id, 60)]
+        mention_scored.sort(key=lambda z:z[0], reverse=True)
+        return {
+            "person_id": pm.person_id,
+            "aliases": pm.aliases,
+            "interaction_count": pm.interaction_count,
+            "mention_count": pm.mention_count,
+            "recurring_terms": pm.recurring_terms,
+            "evidence_strength": pm.evidence_strength,
+            "relationship_examples": [x for _,x in pair_scored[:n]],
+            "direct_mentions": [x for _,x in mention_scored[:n]],
+        }
 
 
 class MeaningResolver:

@@ -22,12 +22,12 @@ try:
 except Exception:
     SpeakerResolver = None
 
-PROJECT_VERSION = "v14.47"
+PROJECT_VERSION = "v14.48"
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 
 
 class AgoHashimotoBot:
-    """Project AGO v14.47 — clean conversation core.
+    """Project AGO v14.48 — person-model conversation core.
 
     Architecture: resolve once -> retrieve grounded evidence -> one generation.
     No candidate tournament, no downstream semantic re-guessing, no replay override.
@@ -74,22 +74,30 @@ class AgoHashimotoBot:
 
     def _prompt(self, meaning, state, speaker):
         style = self.corpus.style_examples(meaning.raw, 8)
-        rel = self.corpus.relationship_examples(meaning.target_id, 8) if meaning.target_id else []
-        mentions = self.corpus.mentions(meaning.target_id, 8) if meaning.target_id else []
+        pm = self.corpus.person_model_for_prompt(meaning.target_id, meaning.raw, 8) if meaning.target_id else None
 
         target_block = "なし"
         if meaning.target_id:
             target_block = f"target_id={meaning.target_id}\n呼び方={meaning.target_label}\n"
-            if rel:
-                target_block += "実際の相手別会話例:\n" + "\n".join(f"相手: {x['other']}\n橋本新: {x['hashimoto']}" for x in rel)
-            if mentions:
-                target_block += "\n橋本新本人による直接言及:\n" + "\n".join(f"- {x}" for x in mentions)
+            if pm:
+                target_block += (
+                    f"人物モデル証拠強度={pm['evidence_strength']}\n"
+                    f"直接会話数={pm['interaction_count']} / 直接言及数={pm['mention_count']}\n"
+                    f"aliases={', '.join(pm['aliases']) or 'なし'}\n"
+                    f"反復話題ヒント={', '.join(pm['recurring_terms']) or 'なし'}\n"
+                )
+                if pm['relationship_examples']:
+                    target_block += "実際の相手別会話例:\n" + "\n".join(
+                        f"相手: {x['other']}\n橋本新: {x['hashimoto']}" for x in pm['relationship_examples']
+                    )
+                if pm['direct_mentions']:
+                    target_block += "\n橋本新本人による直接言及:\n" + "\n".join(f"- {x}" for x in pm['direct_mentions'])
 
         special = ""
         if meaning.intent == "self_state":
             special = "自我・意識が実在すると断定しない。ただし説明AI口調にもせず、橋本新らしい短い返しにする。"
         elif meaning.intent == "person_opinion":
-            special = "人物評価。相手別会話例と直接言及から読み取れる範囲だけで答える。根拠が薄ければ薄い評価にする。『好き』『嫌い』『どうでもいい』『微妙』を資料なしで創作しない。"
+            special = "人物評価。人物モデルの証拠強度・相手別会話・直接言及から読み取れる範囲だけで答える。証拠が弱ければ断定を弱める。『好き』『嫌い』『どうでもいい』『微妙』を資料なしで創作しない。"
         elif meaning.intent == "subject_opinion":
             special = f"対象『{meaning.target_label}』への意見。人物辞書にない対象なので人物関係を捏造せず、橋本新の実ログ文体を使って普通に答える。"
         elif meaning.intent == "ambiguous_followup":
@@ -143,7 +151,12 @@ speaker={speaker or '不明'}
             meaning = self.resolver.resolve(user_text, state, speaker, self._is_group(chat_id))
             print("meaning:", meaning.__dict__, flush=True)
             if not meaning.should_reply:
-                print("generation path: v14_47_silence", flush=True)
+                # Silence is still part of the conversation. Keep it so the next
+                # speaker's ellipsis/follow-up sees what was actually said.
+                state.turns.append({"role":"user","text":user_text,"speaker":speaker})
+                if len(state.turns) > self.max_history * 2:
+                    del state.turns[:-self.max_history * 2]
+                print("generation path: v14_48_silence_context_kept", flush=True)
                 return None
 
             system, user = self._prompt(meaning, state, speaker)
@@ -167,7 +180,7 @@ speaker={speaker or '不明'}
             if len(state.turns) > self.max_history * 2:
                 del state.turns[:-self.max_history * 2]
             self.resolver.commit(state, meaning, speaker)
-            print("generation path: v14_47_single_pass", flush=True)
+            print("generation path: v14_48_person_model_single_pass", flush=True)
             print("reply:", answer, flush=True)
             return answer
 
