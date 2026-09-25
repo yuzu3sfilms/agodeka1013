@@ -565,7 +565,7 @@ class MeaningResolver:
 
         def tm(*args, **kwargs):
             kwargs["stimulus_class"] = stimulus_class
-            return tm(*args, **kwargs)
+            return TurnMeaning(*args, **kwargs)
 
         if SELF_STATE_RE.search(raw):
             return tm(raw, "self_state", predicate="self_state", directed=True)
