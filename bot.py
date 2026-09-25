@@ -22,12 +22,12 @@ try:
 except Exception:
     SpeakerResolver = None
 
-PROJECT_VERSION = "v14.50"
+PROJECT_VERSION = "v14.51"
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 
 
 class AgoHashimotoBot:
-    """Project AGO v14.50 — persistent conversation-state persona core.
+    """Project AGO v14.51 — corpus-learned stimulus-response behavior core.
 
     Architecture: resolve once -> retrieve grounded evidence -> one generation.
     No candidate tournament, no downstream semantic re-guessing, no replay override.
@@ -74,7 +74,8 @@ class AgoHashimotoBot:
         return "\n".join(out) or "なし"
 
     def _prompt(self, meaning, state, speaker):
-        persona = self.corpus.persona_for_prompt(meaning.raw, meaning.intent, 10, state.interaction_mode)
+        persona = self.corpus.persona_for_prompt(meaning.raw, meaning.intent, 8, state.interaction_mode)
+        behavior = self.corpus.response_pattern_for_prompt(meaning.raw, meaning.stimulus_class, speaker, 8)
         pm = self.corpus.person_model_for_prompt(meaning.target_id, meaning.raw, 8) if meaning.target_id else None
 
         target_block = "なし"
@@ -118,6 +119,7 @@ intent={meaning.intent}
 target={meaning.target_id or 'なし'}
 predicate={meaning.predicate or 'なし'}
 inherited_predicate={meaning.inherited_predicate}
+stimulus_class={meaning.stimulus_class or 'なし'}
 user={meaning.raw}
 speaker={speaker or '不明'}
 
@@ -126,6 +128,21 @@ speaker={speaker or '不明'}
 
 【対象人物についての実ログ証拠】
 {target_block}
+
+【実ログから学習した stimulus → response 行動証拠】
+stimulus_class={behavior['stimulus_class']}
+同クラス実例数={behavior['count']}
+橋本の応答mode分布={behavior['response_modes']}
+橋本の応答長中央値={behavior['median_response_length']}
+類似する実際の反応ペア:
+""" + "\n".join(
+    f"- 相手: {x['stimulus']}\n  橋本新: {x['response']}" for x in behavior['examples']
+) + f"""
+
+【行動モデルの使い方】
+この証拠は「この種類の刺激に橋本がどう反応しがちか」のためだけに使う。
+実例の話題・固有名詞・事実を現在へコピーしない。
+現在ターンの意味解析・人物モデルと衝突した場合は、意味解析・人物モデルを優先する。
 
 【現在の会話人格状態】
 interaction_mode={state.interaction_mode}
@@ -141,8 +158,10 @@ mode_age={state.mode_age}
 """ + "\n".join(f"- [{x['mode']}] {x['text']}" for x in persona['examples']) + f"""
 
 【人格合成ルール】
-内容は現在会話と人物別実ログを優先。距離感・長さ・丁寧さ・ふざけ方は全体人格モデルを優先。
-人物モデルにない好き嫌い・経験を全体人格から捏造しない。実例の固有名詞や事実を別場面へコピーしない。
+内容・対象・事実は確定意味解析と人物別実ログを最優先。
+反応の型はstimulus→response行動証拠を優先。
+距離感・長さ・丁寧さ・ふざけ方は会話人格状態と全体人格モデルを使う。
+下流の証拠から上流の意味を変更しない。人物モデルにない好き嫌い・経験を捏造しない。
 
 【今回だけの制約】
 {special or '現在の発言へ普通に直接返す。'}
@@ -180,7 +199,7 @@ mode_age={state.mode_age}
                 state.turns.append({"role":"user","text":user_text,"speaker":speaker})
                 if len(state.turns) > self.max_history * 2:
                     del state.turns[:-self.max_history * 2]
-                print("generation path: v14_50_silence_context_kept", flush=True)
+                print("generation path: v14_51_silence_context_kept", flush=True)
                 return None
 
             system, user = self._prompt(meaning, state, speaker)
@@ -206,7 +225,7 @@ mode_age={state.mode_age}
             self.resolver.commit(state, meaning, speaker)
             self.dynamics.after_reply(state, answer)
             print("conversation_mode:", {"mode": state.interaction_mode, "strength": state.mode_strength, "age": state.mode_age}, flush=True)
-            print("generation path: v14_50_persistent_persona_state", flush=True)
+            print("generation path: v14_51_stimulus_response_single_pass", flush=True)
             print("reply:", answer, flush=True)
             return answer
 

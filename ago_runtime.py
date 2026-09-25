@@ -49,6 +49,7 @@ class TurnMeaning:
     directed: bool = False
     should_reply: bool = True
     ambiguity: str = ""
+    stimulus_class: str = ""
 
 
 @dataclass
@@ -74,6 +75,15 @@ class PersonModel:
     interaction_style_examples: list[dict] = field(default_factory=list)
     direct_mention_examples: list[str] = field(default_factory=list)
     evidence_strength: str = "none"
+
+
+@dataclass
+class ResponsePatternModel:
+    stimulus_class: str
+    count: int = 0
+    response_modes: dict[str, int] = field(default_factory=dict)
+    median_response_length: int = 0
+    examples: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -106,6 +116,8 @@ class CorpusIndex:
         self.direct_mentions = defaultdict(list)
         self.person_models: dict[str, PersonModel] = {}
         self.persona_model = PersonaModel()
+        self.response_patterns: dict[str, ResponsePatternModel] = {}
+        self.response_pairs: list[dict] = []
         self._load()
 
     def _candidate_files(self):
@@ -195,6 +207,7 @@ class CorpusIndex:
         self._build_aliases()
         self._build_evidence()
         self._build_persona_model()
+        self._build_response_patterns()
         self._build_person_models()
 
     def resolve_person(self, token: str, current_speaker: str = "") -> tuple[str, str]:
@@ -336,6 +349,103 @@ class CorpusIndex:
                 "question_rate":pm.question_rate,"laughter_rate":pm.laughter_rate,"polite_rate":pm.polite_rate,
                 "terse_rate":pm.terse_rate,"examples":out}
 
+    @staticmethod
+    def classify_stimulus(text: str) -> str:
+        """Classify the incoming conversational stimulus, not its topic.
+
+        This label is behavioral metadata only. It never changes target/person/intent.
+        """
+        t=(text or "").strip()
+        if not t:
+            return "empty"
+        if re.search(r"(?:ありがとう|ありがと|助かった|サンキュ|感謝)", t, re.I):
+            return "thanks"
+        if re.search(r"(?:ごめん|すみません|すまん|申し訳|遅れ|遅刻)", t):
+            return "apology"
+        if re.search(r"(?:あげる|くれる|もらう|プレゼント|奢る|おごる)", t):
+            return "offer_gift"
+        if re.search(r"(?:ww+|ｗｗ+|笑|草|ウケ|おもろ|面白)", t, re.I):
+            return "joke_laughter"
+        if re.search(r"(?:何時|何分|いつ|今日|明日|来週|土曜|日曜|集合|予定|行ける|空いて|予約)", t):
+            return "scheduling"
+        if re.search(r"(?:やば|まじ|マジ|えっ|ええ|うそ|嘘|！？|!\?)", t, re.I):
+            return "surprise"
+        if re.search(r"(?:嫌|だる|つら|辛|無理|最悪|困|疲れ|めんど)", t):
+            return "complaint"
+        if re.search(r"(?:どう思|好き|嫌い|どっち|どれ|おすすめ|良い|いいと思)", t):
+            return "opinion_request"
+        if QUESTION_RE.search(t):
+            return "question"
+        if re.search(r"^(?:おは|こんにちは|こんばんは|おつ|乙|よろしく|久しぶり)", t):
+            return "greeting"
+        if len(t) <= 8:
+            return "short_reaction"
+        return "statement"
+
+    def _build_response_patterns(self):
+        """Learn stimulus -> Hashimoto response pairs from actual adjacency.
+
+        Only non-Hashimoto -> immediately-following Hashimoto messages are used.
+        This avoids reversing Hashimoto prompts into fake response evidence.
+        """
+        grouped=defaultdict(list)
+        for i in range(1, len(self.messages)):
+            prev, cur = self.messages[i-1], self.messages[i]
+            if prev.get("source") != cur.get("source"):
+                continue
+            if is_hashimoto(prev.get("sender", "")) or not is_hashimoto(cur.get("sender", "")):
+                continue
+            stimulus=(prev.get("text") or "").strip()
+            response=(cur.get("text") or "").strip()
+            if not stimulus or not response or MEDIA_RE.search(stimulus) or MEDIA_RE.search(response):
+                continue
+            if len(stimulus) > 240 or len(response) > 180:
+                continue
+            cls=self.classify_stimulus(stimulus)
+            pair={"stimulus":stimulus,"response":response,"partner":prev.get("sender", ""),
+                  "stimulus_class":cls,"response_mode":self._behavior_mode(response)}
+            self.response_pairs.append(pair)
+            grouped[cls].append(pair)
+
+        for cls,pairs in grouped.items():
+            lengths=[len(x["response"]) for x in pairs]
+            modes=Counter(x["response_mode"] for x in pairs)
+            self.response_patterns[cls]=ResponsePatternModel(
+                stimulus_class=cls,
+                count=len(pairs),
+                response_modes=dict(modes),
+                median_response_length=self._percentile(lengths,.5),
+                examples=pairs[:80],
+            )
+
+    def response_pattern_for_prompt(self, query: str, stimulus_class: str, partner: str="", n=8):
+        model=self.response_patterns.get(stimulus_class)
+        if not model:
+            return {"stimulus_class":stimulus_class,"count":0,"response_modes":{},
+                    "median_response_length":0,"examples":[]}
+        scored=[]
+        canonical_partner=""
+        if partner:
+            canonical_partner=self.alias_to_name.get(partner, partner)
+        for x in self.response_pairs:
+            if x["stimulus_class"] != stimulus_class:
+                continue
+            score=self._score_line(query, x["stimulus"])
+            xp=self.alias_to_name.get(x["partner"], x["partner"])
+            if canonical_partner and xp == canonical_partner:
+                score += 18
+            scored.append((score,x))
+        scored.sort(key=lambda z:z[0], reverse=True)
+        out=[]; seen=set()
+        for _,x in scored:
+            key=(x["stimulus"],x["response"])
+            if key in seen: continue
+            seen.add(key); out.append(x)
+            if len(out)>=n: break
+        return {"stimulus_class":stimulus_class,"count":model.count,
+                "response_modes":model.response_modes,
+                "median_response_length":model.median_response_length,"examples":out}
+
     def _build_person_models(self):
         people = set(self.name_to_aliases) | set(self.exchanges) | set(self.direct_mentions)
         for pid in people:
@@ -451,40 +561,45 @@ class MeaningResolver:
         raw = (text or "").strip()
         called = bool(CALL_RE.search(raw))
         directed = called or bool(QUESTION_RE.search(raw))
+        stimulus_class = self.corpus.classify_stimulus(raw)
+
+        def tm(*args, **kwargs):
+            kwargs["stimulus_class"] = stimulus_class
+            return tm(*args, **kwargs)
 
         if SELF_STATE_RE.search(raw):
-            return TurnMeaning(raw, "self_state", predicate="self_state", directed=True)
+            return tm(raw, "self_state", predicate="self_state", directed=True)
 
         m = PERSON_OPINION_RE.match(raw)
         if m:
             person_id, label = self.corpus.resolve_person(m.group(1), current_speaker)
             if person_id:
-                return TurnMeaning(raw, "person_opinion", person_id, label, "opinion", False, True)
-            return TurnMeaning(raw, "subject_opinion", "", label, "opinion", False, True)
+                return tm(raw, "person_opinion", person_id, label, "opinion", False, True)
+            return tm(raw, "subject_opinion", "", label, "opinion", False, True)
 
         # Narrow ellipsis: only a recognizable person can inherit a person-opinion predicate.
         sm = SHORT_PERSON_RE.match(raw)
         if sm and state.last_intent == "person_opinion" and state.last_predicate == "opinion":
             person_id, label = self.corpus.resolve_person(sm.group(1), current_speaker)
             if person_id:
-                return TurnMeaning(raw, "person_opinion", person_id, label, "opinion", True, True)
+                return tm(raw, "person_opinion", person_id, label, "opinion", True, True)
 
         # Choice words are never allowed to inherit a person predicate.
         if CHOICE_RE.match(raw):
             recent_text = "\n".join(t.get("text", "") for t in state.turns[-4:])
             has_options = bool(re.search(r"(?:A|B|1|2|どっち|どちら|か、|それとも|or)", recent_text, re.I))
-            return TurnMeaning(raw, "choice_followup" if has_options else "ambiguous_followup", predicate="choice", directed=True, ambiguity="" if has_options else "no_visible_options")
+            return tm(raw, "choice_followup" if has_options else "ambiguous_followup", predicate="choice", directed=True, ambiguity="" if has_options else "no_visible_options")
 
         if QUESTION_RE.search(raw):
-            return TurnMeaning(raw, "question", predicate="question", directed=True)
+            return tm(raw, "question", predicate="question", directed=True)
 
         if called:
-            return TurnMeaning(raw, "called_chat", predicate="chat", directed=True)
+            return tm(raw, "called_chat", predicate="chat", directed=True)
 
         # Group first-message fragments like 「えー」 are not assumed to address AGO.
         if is_group:
-            return TurnMeaning(raw, "group_chatter", predicate="chat", directed=False, should_reply=False)
-        return TurnMeaning(raw, "chat", predicate="chat", directed=True)
+            return tm(raw, "group_chatter", predicate="chat", directed=False, should_reply=False)
+        return tm(raw, "chat", predicate="chat", directed=True)
 
     @staticmethod
     def commit(state: DialogueState, meaning: TurnMeaning, partner: str):
