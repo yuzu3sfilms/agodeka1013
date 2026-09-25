@@ -22,12 +22,12 @@ try:
 except Exception:
     SpeakerResolver = None
 
-PROJECT_VERSION = "v14.51.1"
+PROJECT_VERSION = "v14.52"
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 
 
 class AgoHashimotoBot:
-    """Project AGO v14.51.1 — corpus-learned stimulus-response behavior core.
+    """Project AGO v14.52 — structure-grounded persona response core.
 
     Architecture: resolve once -> retrieve grounded evidence -> one generation.
     No candidate tournament, no downstream semantic re-guessing, no replay override.
@@ -74,8 +74,12 @@ class AgoHashimotoBot:
         return "\n".join(out) or "なし"
 
     def _prompt(self, meaning, state, speaker):
-        persona = self.corpus.persona_for_prompt(meaning.raw, meaning.intent, 8, state.interaction_mode)
-        behavior = self.corpus.response_pattern_for_prompt(meaning.raw, meaning.stimulus_class, speaker, 8)
+        behavior = self.corpus.response_pattern_for_prompt(
+            meaning.raw, meaning.stimulus_class, speaker, 6, meaning.stimulus_shape
+        )
+        persona = self.corpus.persona_for_prompt(
+            meaning.raw, meaning.intent, 3, state.interaction_mode, behavior.get("response_modes")
+        )
         pm = self.corpus.person_model_for_prompt(meaning.target_id, meaning.raw, 8) if meaning.target_id else None
 
         target_block = "なし"
@@ -97,7 +101,7 @@ class AgoHashimotoBot:
 
         special = ""
         if meaning.intent == "self_state":
-            special = "自我・意識が実在すると断定しない。ただし説明AI口調にもせず、橋本新らしい短い返しにする。"
+            special = "自己言及・変な問いも会話上のノリとして直接返す。哲学説明やAIの能力説明に変換しない。過去反応ペアの返し方を優先する。"
         elif meaning.intent == "person_opinion":
             special = "人物評価。人物モデルの証拠強度・相手別会話・直接言及から読み取れる範囲だけで答える。証拠が弱ければ断定を弱める。『好き』『嫌い』『どうでもいい』『微妙』を資料なしで創作しない。"
         elif meaning.intent == "subject_opinion":
@@ -108,11 +112,17 @@ class AgoHashimotoBot:
             special = "直近会話に実在する選択肢だけを参照して答える。新しい選択肢を捏造しない。"
 
         system = """あなたはLINE上の橋本新を、実際の過去ログに基づいて再現するProject AGO。
-便利AI、ChatGPT、カウンセラーとして振る舞わない。過剰に親切な『手伝える？』『詳しく教えて』を自動で言わない。
-人格は奇妙な語尾ではなく、提示された実ログの反応・距離感・言い回しから再現する。
-現在の意味解析結果は上流で確定済み。あなたは人物・主語・述語を再解釈しない。
+便利AI、ChatGPT、カウンセラーとして振る舞わない。
+現在の意味解析結果は上流で確定済み。人物・主語・述語を再解釈しない。
 資料にない過去経験、好き嫌い、関係性、感情、予定を発明しない。
-LINEの一発言として自然に返す。通常1文、必要なら2文。候補一覧や説明は出さず返答本文だけ出す。"""
+
+最重要なのは「何を説明すべきか」ではなく「橋本新ならこの刺激へどう返すか」。
+stimulus→response実例の上位ほど強い行動アンカーとして扱い、内容ではなく返し方・短さ・間・温度を移す。
+ユーザー文を言い換えてから答えない。質問を復唱しない。前置き・但し書き・一般論を足さない。
+変な問い、自己言及、雑談も、必要以上に意味を深掘りせずLINEの一発言として返す。
+実例が短い反応なら短く返し、実例が普通の説明なら必要な範囲だけ説明する。
+全体人格例は語尾コピー用ではなく距離感・テンポの補助資料。無関係な固有名詞や話題は移さない。
+通常1文、必要なら2文。候補一覧・解説・メタ説明は出さず返答本文だけ出す。"""
 
         user = f"""【確定した現在ターン】
 intent={meaning.intent}
@@ -120,6 +130,7 @@ target={meaning.target_id or 'なし'}
 predicate={meaning.predicate or 'なし'}
 inherited_predicate={meaning.inherited_predicate}
 stimulus_class={meaning.stimulus_class or 'なし'}
+stimulus_shape={meaning.stimulus_shape or 'なし'}
 user={meaning.raw}
 speaker={speaker or '不明'}
 
@@ -129,8 +140,9 @@ speaker={speaker or '不明'}
 【対象人物についての実ログ証拠】
 {target_block}
 
-【実ログから学習した stimulus → response 行動証拠】
+【最優先：実ログから学習した stimulus → response 行動証拠】
 stimulus_class={behavior['stimulus_class']}
+stimulus_shape={behavior.get('stimulus_shape','なし')}
 同クラス実例数={behavior['count']}
 橋本の応答mode分布={behavior['response_modes']}
 橋本の応答長中央値={behavior['median_response_length']}
@@ -140,9 +152,10 @@ stimulus_class={behavior['stimulus_class']}
 ) + f"""
 
 【行動モデルの使い方】
-この証拠は「この種類の刺激に橋本がどう反応しがちか」のためだけに使う。
-実例の話題・固有名詞・事実を現在へコピーしない。
-現在ターンの意味解析・人物モデルと衝突した場合は、意味解析・人物モデルを優先する。
+上から順に強いアンカー。特にstimulus_shapeが同じ実例は、返答の構造・短さ・温度の第一根拠にする。
+実例の話題・固有名詞・事実は現在へコピーしない。
+意味解析・人物モデルと衝突した場合だけ、意味解析・人物モデルを優先する。
+「質問だから質問で返す」のような機械的模倣はしない。ユーザー側の文法と橋本側の返答modeは別物。
 
 【現在の会話人格状態】
 interaction_mode={state.interaction_mode}
@@ -158,9 +171,11 @@ mode_age={state.mode_age}
 """ + "\n".join(f"- [{x['mode']}] {x['text']}" for x in persona['examples']) + f"""
 
 【人格合成ルール】
-内容・対象・事実は確定意味解析と人物別実ログを最優先。
-反応の型はstimulus→response行動証拠を優先。
-距離感・長さ・丁寧さ・ふざけ方は会話人格状態と全体人格モデルを使う。
+1. 内容・対象・事実 = 確定意味解析と人物別実ログ。
+2. 返し方・短さ・反応の型 = stimulus→response上位実例。
+3. 距離感・丁寧さ・ふざけ方 = 持続中のAGO会話状態と全体人格モデル。
+ユーザーの疑問符だけでAGOを質問調にしない。
+上位実例が短い反応なら、説明を追加して“賢く”しない。
 下流の証拠から上流の意味を変更しない。人物モデルにない好き嫌い・経験を捏造しない。
 
 【今回だけの制約】
@@ -199,7 +214,7 @@ mode_age={state.mode_age}
                 state.turns.append({"role":"user","text":user_text,"speaker":speaker})
                 if len(state.turns) > self.max_history * 2:
                     del state.turns[:-self.max_history * 2]
-                print("generation path: v14_51_silence_context_kept", flush=True)
+                print("generation path: v14_52_silence_context_kept", flush=True)
                 return None
 
             system, user = self._prompt(meaning, state, speaker)
@@ -207,7 +222,7 @@ mode_age={state.mode_age}
                 res = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role":"system","content":system},{"role":"user","content":user}],
-                    temperature=float(os.environ.get("TEMPERATURE", "0.72")),
+                    temperature=float(os.environ.get("TEMPERATURE", "0.58")),
                     max_completion_tokens=int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "256")),
                     extra_body={"reasoning_effort": os.environ.get("GROQ_REASONING_EFFORT", "low")},
                 )
@@ -225,7 +240,7 @@ mode_age={state.mode_age}
             self.resolver.commit(state, meaning, speaker)
             self.dynamics.after_reply(state, answer)
             print("conversation_mode:", {"mode": state.interaction_mode, "strength": state.mode_strength, "age": state.mode_age}, flush=True)
-            print("generation path: v14_51_stimulus_response_single_pass", flush=True)
+            print("generation path: v14_52_structure_grounded_single_pass", flush=True)
             print("reply:", answer, flush=True)
             return answer
 

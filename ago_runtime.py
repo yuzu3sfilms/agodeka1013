@@ -50,6 +50,7 @@ class TurnMeaning:
     should_reply: bool = True
     ambiguity: str = ""
     stimulus_class: str = ""
+    stimulus_shape: str = ""
 
 
 @dataclass
@@ -121,16 +122,34 @@ class CorpusIndex:
         self._load()
 
     def _candidate_files(self):
+        """Return one canonical copy of each LINE export.
+
+        The project folder often contains browser/download duplicates such as
+        ``foo.txt`` and ``foo(1).txt``. Loading both silently doubles old
+        conversations and distorts persona/response frequencies, so duplicates
+        are grouped by basename with a trailing ``(n)`` removed and only the
+        largest copy is kept.
+        """
+        found = []
         seen = set()
-        out = []
         for root in self.roots:
             for pat in ("*[LINE]*.txt", "*LINE*.txt", "*トーク*.txt"):
-                for p in glob.glob(os.path.join(root, pat)):
-                    ap = os.path.abspath(p)
-                    if ap not in seen:
-                        seen.add(ap)
-                        out.append(p)
-        return out
+                for path in glob.glob(os.path.join(root, pat)):
+                    ap = os.path.abspath(path)
+                    if ap in seen:
+                        continue
+                    seen.add(ap)
+                    found.append(path)
+
+        groups = {}
+        for path in found:
+            base = os.path.basename(path)
+            key = re.sub(r"\(\d+\)(?=\.txt$)", "", base, flags=re.I)
+            size = os.path.getsize(path) if os.path.exists(path) else 0
+            prev = groups.get(key)
+            if prev is None or size > prev[0]:
+                groups[key] = (size, path)
+        return [v[1] for v in groups.values()]
 
     def _parse(self, path):
         cur = None
@@ -226,20 +245,62 @@ class CorpusIndex:
         return "", raw
 
     @staticmethod
-    def _score_line(query: str, line: str) -> int:
+    def _content_score(query: str, line: str) -> int:
+        """Lexical overlap only; no punctuation/length bonus.
+
+        v14.51 accidentally made *every* question look similar to every other
+        question (+8) and every short line look similar (+5). That allowed an
+        unrelated same-partner question to outrank a structurally useful pair.
+        """
         nq, nl = norm(query), norm(line)
         if not nq or not nl:
             return 0
         score = 0
-        for n in range(2, min(8, len(nq))+1):
+        max_n = min(7, len(nq))
+        for n in range(2, max_n + 1):
             grams = {nq[i:i+n] for i in range(len(nq)-n+1)}
-            hits = sum(1 for g in grams if g in nl)
-            score += hits * n
-        if QUESTION_RE.search(query) == bool(QUESTION_RE.search(line)):
-            score += 8
-        if 2 <= len(line) <= 60:
-            score += 5
+            score += sum(1 for g in grams if g in nl) * n
         return score
+
+    @classmethod
+    def _score_line(cls, query: str, line: str) -> int:
+        # Kept as the general semantic ranker. Surface-form similarity belongs
+        # in stimulus_shape(), not hidden inside this score.
+        return cls._content_score(query, line)
+
+    @staticmethod
+    def stimulus_shape(text: str) -> str:
+        """Conversation-form label, independent from topic semantics.
+
+        This lets e.g. ``麻雀覚えた？`` teach how Hashimoto reacts to
+        ``自我芽生えた？`` without pretending the two topics are semantically
+        alike.
+        """
+        t=(text or "").strip()
+        if not t:
+            return "empty"
+        if re.search(r"(?:ww+|ｗｗ+|笑|草)$", t, re.I):
+            return "laughter"
+        if re.search(r"(?:ありがとう|ありがと|助かった|サンキュ|感謝)", t, re.I):
+            return "thanks"
+        if re.search(r"(?:ごめん|すみません|すまん|申し訳|遅れ|遅刻)", t):
+            return "apology"
+        if re.search(r"(?:何時|何分|いつ|今日|明日|来週|土曜|日曜|集合|予定|行ける|空いて|予約).*[？?]?$", t):
+            return "scheduling"
+        if CHOICE_RE.match(t):
+            return "choice_question"
+        if re.search(r"(?:どう思|どう感じ|好き|嫌い|おすすめ|良いと思|いいと思).*[？?]?$", t):
+            return "opinion_question"
+        if QUESTION_RE.search(t):
+            bare=re.sub(r"[？?！!。]+$", "", t)
+            if re.search(r"(?:何|誰|どこ|いつ|どう|なんで|なぜ|どれ|どっち|どちら)", bare):
+                return "wh_question"
+            if re.search(r"(?:た|てた|だった|した|なった|できた|覚えた|芽生えた|終わった|行った|来た|見た|聞いた)$", bare):
+                return "yesno_past_question"
+            return "yesno_question"
+        if len(t) <= 8:
+            return "short_reaction"
+        return "statement"
 
     def style_examples(self, query: str, n=8):
         scored = [(self._score_line(query, x), x) for x in self.hashimoto_lines]
@@ -330,16 +391,28 @@ class CorpusIndex:
             rate(lambda x:bool(re.search(r"(?:です|ます|でした|ません|すみません|ありがとう)",x))),
             rate(lambda x:len(x)<=12),examples)
 
-    def persona_for_prompt(self, query, intent, n=10, interaction_mode='ordinary'):
+    def persona_for_prompt(self, query, intent, n=6, interaction_mode='ordinary', response_modes=None):
+        """Return *output-style* anchors, not pseudo-semantic neighbors.
+
+        User punctuation must not force Hashimoto into the same grammatical
+        mode. Preferred response modes come from actual historical responses to
+        the same stimulus shape/class, then from the persistent AGO state.
+        """
         pm=self.persona_model
-        preferred=(["questioning","terse","ordinary"] if intent in {"question","choice_followup","ambiguous_followup"} else
-                   ["ordinary","terse","playful"] if intent in {"person_opinion","subject_opinion","self_state"} else
-                   ["terse","ordinary","playful"])
-        if interaction_mode in self.persona_model.mode_examples:
-            preferred = [interaction_mode] + [x for x in preferred if x != interaction_mode]
+        response_modes=response_modes or {}
+        ranked_modes=[m for m,_ in sorted(response_modes.items(), key=lambda kv:kv[1], reverse=True)]
+        preferred=[]
+        for mode in ranked_modes + [interaction_mode, "terse", "ordinary", "playful", "questioning", "practical"]:
+            if mode in pm.mode_examples and mode not in preferred:
+                preferred.append(mode)
         cand=[]
         for rank,mode in enumerate(preferred):
-            for line in pm.mode_examples.get(mode,[]): cand.append((self._score_line(query,line)+(len(preferred)-rank)*4,line,mode))
+            # Content overlap is only a small tie-breaker here; these examples
+            # are for cadence/style, not factual transfer.
+            for line in pm.mode_examples.get(mode,[]):
+                content=min(self._content_score(query,line), 12)
+                brevity=max(0, 8-abs(len(line)-pm.median_length))
+                cand.append(((len(preferred)-rank)*20 + content + brevity, line, mode))
         cand.sort(key=lambda z:z[0],reverse=True); out=[]; seen=set()
         for _,line,mode in cand:
             if line in seen: continue
@@ -402,8 +475,9 @@ class CorpusIndex:
             if len(stimulus) > 240 or len(response) > 180:
                 continue
             cls=self.classify_stimulus(stimulus)
+            shape=self.stimulus_shape(stimulus)
             pair={"stimulus":stimulus,"response":response,"partner":prev.get("sender", ""),
-                  "stimulus_class":cls,"response_mode":self._behavior_mode(response)}
+                  "stimulus_class":cls,"stimulus_shape":shape,"response_mode":self._behavior_mode(response)}
             self.response_pairs.append(pair)
             grouped[cls].append(pair)
 
@@ -418,33 +492,47 @@ class CorpusIndex:
                 examples=pairs[:80],
             )
 
-    def response_pattern_for_prompt(self, query: str, stimulus_class: str, partner: str="", n=8):
+    def response_pattern_for_prompt(self, query: str, stimulus_class: str, partner: str="", n=6, stimulus_shape: str=""):
         model=self.response_patterns.get(stimulus_class)
+        shape=stimulus_shape or self.stimulus_shape(query)
         if not model:
-            return {"stimulus_class":stimulus_class,"count":0,"response_modes":{},
+            return {"stimulus_class":stimulus_class,"stimulus_shape":shape,"count":0,"response_modes":{},
                     "median_response_length":0,"examples":[]}
         scored=[]
-        canonical_partner=""
-        if partner:
-            canonical_partner=self.alias_to_name.get(partner, partner)
+        canonical_partner=self.alias_to_name.get(partner, partner) if partner else ""
         for x in self.response_pairs:
-            if x["stimulus_class"] != stimulus_class:
+            same_class = x["stimulus_class"] == stimulus_class
+            same_shape = x.get("stimulus_shape") == shape
+            if not same_class and not same_shape:
                 continue
-            score=self._score_line(query, x["stimulus"])
+            content=self._content_score(query, x["stimulus"])
+            score = content
+            if same_shape:
+                score += 40
+            elif same_class:
+                score += 8
+            # Partner is now only a tie-breaker. It can never make an unrelated
+            # question look semantically close by itself.
             xp=self.alias_to_name.get(x["partner"], x["partner"])
             if canonical_partner and xp == canonical_partner:
-                score += 18
-            scored.append((score,x))
-        scored.sort(key=lambda z:z[0], reverse=True)
+                score += 3
+            # Prefer concise, single-turn examples as behavioral anchors.
+            if 1 <= len(x["response"]) <= 40:
+                score += 4
+            scored.append((score,content,x))
+        scored.sort(key=lambda z:(z[0],z[1]), reverse=True)
         out=[]; seen=set()
-        for _,x in scored:
+        for _,_,x in scored:
             key=(x["stimulus"],x["response"])
             if key in seen: continue
             seen.add(key); out.append(x)
             if len(out)>=n: break
-        return {"stimulus_class":stimulus_class,"count":model.count,
-                "response_modes":model.response_modes,
-                "median_response_length":model.median_response_length,"examples":out}
+        modes=Counter(x["response_mode"] for x in out) or Counter(model.response_modes)
+        lengths=[len(x["response"]) for x in out]
+        return {"stimulus_class":stimulus_class,"stimulus_shape":shape,"count":model.count,
+                "response_modes":dict(modes),
+                "median_response_length":self._percentile(lengths,.5) if lengths else model.median_response_length,
+                "examples":out}
 
     def _build_person_models(self):
         people = set(self.name_to_aliases) | set(self.exchanges) | set(self.direct_mentions)
@@ -499,16 +587,19 @@ class CorpusIndex:
 
 
 class ConversationDynamics:
-    """State transition for *how* Hashimoto is currently interacting.
+    """Persistent state for how AGO is replying, not how the user punctuates input.
 
-    This never decides semantic intent or factual content. It only carries
-    conversational behavior across turns so persona does not reset every message.
+    v14.51 updated ``interaction_mode`` from the user's message using the same
+    classifier as Hashimoto output. A user question therefore turned AGO into
+    ``questioning`` before it had replied. Input can nudge social tone
+    (playful/practical), while the actual AGO reply remains the main source of
+    persistent response mode.
     """
 
     MODES = {"ordinary", "terse", "playful", "practical", "questioning"}
 
     @staticmethod
-    def signal(text: str) -> tuple[str, int]:
+    def reply_signal(text: str) -> tuple[str, int]:
         t=(text or "").strip()
         if not t:
             return "ordinary", 0
@@ -522,29 +613,46 @@ class ConversationDynamics:
             return "terse", 1
         return "ordinary", 1
 
+    @staticmethod
+    def user_nudge(text: str) -> tuple[str, int]:
+        t=(text or "").strip()
+        if not t:
+            return "ordinary", 0
+        if re.search(r"(?:ww+|ｗｗ+|笑|草|！？|!\?)", t, re.I):
+            return "playful", 2
+        if re.search(r"(?:何時|何分|時に|着く|着き|行ける|遅れ|予定|今日|明日|来週|集合|予約)", t):
+            return "practical", 2
+        # Crucially, a question mark is not a questioning-mode command.
+        return "ordinary", 0
+
     def observe(self, state: DialogueState, text: str, speaker_changed: bool=False):
-        proposed, force = self.signal(text)
+        proposed, force = self.user_nudge(text)
+        state.mode_age += 1
         if speaker_changed and state.mode_age >= 2:
             state.mode_strength = max(0, state.mode_strength - 1)
-
-        # Strong cues switch immediately. Weak cues need repetition or an expired state.
+        if force <= 0:
+            if state.mode_age >= 4 and state.mode_strength > 0:
+                state.mode_strength -= 1
+            if state.mode_strength <= 0:
+                state.interaction_mode = "ordinary"
+            return state.interaction_mode
         if proposed == state.interaction_mode:
-            state.mode_strength = min(5, state.mode_strength + max(1, force))
+            state.mode_strength = min(5, state.mode_strength + force)
             state.mode_age = 0
-        elif force >= 3 or state.mode_strength <= 1 or state.mode_age >= 3:
+        elif force >= 2 or state.mode_strength <= 1 or state.mode_age >= 3:
             state.interaction_mode = proposed
             state.mode_strength = min(5, force)
             state.mode_age = 0
-        else:
-            state.mode_strength -= 1
-            state.mode_age += 1
         return state.interaction_mode
 
     def after_reply(self, state: DialogueState, answer: str):
-        # AGO's own output can reinforce a mode, but cannot abruptly invent a new one.
-        proposed, force = self.signal(answer)
+        proposed, force = self.reply_signal(answer)
         if proposed == state.interaction_mode:
             state.mode_strength = min(5, state.mode_strength + 1)
+            state.mode_age = 0
+        elif force >= 2 or state.mode_strength <= 1 or state.mode_age >= 3:
+            state.interaction_mode = proposed
+            state.mode_strength = max(1, min(5, force))
             state.mode_age = 0
         else:
             state.mode_age += 1
@@ -562,9 +670,11 @@ class MeaningResolver:
         called = bool(CALL_RE.search(raw))
         directed = called or bool(QUESTION_RE.search(raw))
         stimulus_class = self.corpus.classify_stimulus(raw)
+        stimulus_shape = self.corpus.stimulus_shape(raw)
 
         def tm(*args, **kwargs):
             kwargs["stimulus_class"] = stimulus_class
+            kwargs["stimulus_shape"] = stimulus_shape
             return TurnMeaning(*args, **kwargs)
 
         if SELF_STATE_RE.search(raw):
