@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from openai import OpenAI
 
-from ago_runtime import CorpusIndex, DialogueState, MeaningResolver
+from ago_runtime import CorpusIndex, DialogueState, MeaningResolver, ConversationDynamics
 
 try:
     from shutdown_state import ShutdownStateStore
@@ -22,12 +22,12 @@ try:
 except Exception:
     SpeakerResolver = None
 
-PROJECT_VERSION = "v14.49"
+PROJECT_VERSION = "v14.50"
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 
 
 class AgoHashimotoBot:
-    """Project AGO v14.49 — unified persona + relationship conversation core.
+    """Project AGO v14.50 — persistent conversation-state persona core.
 
     Architecture: resolve once -> retrieve grounded evidence -> one generation.
     No candidate tournament, no downstream semantic re-guessing, no replay override.
@@ -38,6 +38,7 @@ class AgoHashimotoBot:
         self.client = OpenAI(api_key=os.environ["GROQ_API_KEY"], base_url="https://api.groq.com/openai/v1")
         self.corpus = CorpusIndex(roots=["data", "."])
         self.resolver = MeaningResolver(self.corpus)
+        self.dynamics = ConversationDynamics()
         self.states = defaultdict(DialogueState)
         self.locks = defaultdict(threading.RLock)
         self.shutdown_store = ShutdownStateStore()
@@ -73,7 +74,7 @@ class AgoHashimotoBot:
         return "\n".join(out) or "なし"
 
     def _prompt(self, meaning, state, speaker):
-        persona = self.corpus.persona_for_prompt(meaning.raw, meaning.intent, 10)
+        persona = self.corpus.persona_for_prompt(meaning.raw, meaning.intent, 10, state.interaction_mode)
         pm = self.corpus.person_model_for_prompt(meaning.target_id, meaning.raw, 8) if meaning.target_id else None
 
         target_block = "なし"
@@ -126,6 +127,12 @@ speaker={speaker or '不明'}
 【対象人物についての実ログ証拠】
 {target_block}
 
+【現在の会話人格状態】
+interaction_mode={state.interaction_mode}
+mode_strength={state.mode_strength}
+mode_age={state.mode_age}
+この状態は内容・事実を決めない。返答のテンポ、距離感、丁寧さ、ふざけ方だけに使う。
+
 【橋本新の全体人格モデル（実ログから自動集計）】
 発言数={persona['line_count']}
 発言長中央値={persona['median_length']} / p75={persona['p75_length']}
@@ -157,6 +164,8 @@ speaker={speaker or '不明'}
             state = self.states[chat_id]
             speaker = self._speaker(sender_id, sender_display_name)
             meaning = self.resolver.resolve(user_text, state, speaker, self._is_group(chat_id))
+            speaker_changed = bool(state.last_partner and state.last_partner != speaker)
+            self.dynamics.observe(state, user_text, speaker_changed=speaker_changed)
             if self._is_group(chat_id):
                 called = bool(re.search(r"(?:あらくん|橋本|橋本新|顎|アゴ|AGODEKA)", user_text or "", re.I))
                 previous = state.turns[-1] if state.turns else {}
@@ -171,7 +180,7 @@ speaker={speaker or '不明'}
                 state.turns.append({"role":"user","text":user_text,"speaker":speaker})
                 if len(state.turns) > self.max_history * 2:
                     del state.turns[:-self.max_history * 2]
-                print("generation path: v14_49_silence_context_kept", flush=True)
+                print("generation path: v14_50_silence_context_kept", flush=True)
                 return None
 
             system, user = self._prompt(meaning, state, speaker)
@@ -195,7 +204,9 @@ speaker={speaker or '不明'}
             if len(state.turns) > self.max_history * 2:
                 del state.turns[:-self.max_history * 2]
             self.resolver.commit(state, meaning, speaker)
-            print("generation path: v14_49_persona_relationship_single_pass", flush=True)
+            self.dynamics.after_reply(state, answer)
+            print("conversation_mode:", {"mode": state.interaction_mode, "strength": state.mode_strength, "age": state.mode_age}, flush=True)
+            print("generation path: v14_50_persistent_persona_state", flush=True)
             print("reply:", answer, flush=True)
             return answer
 

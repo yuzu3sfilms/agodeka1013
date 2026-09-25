@@ -58,6 +58,9 @@ class DialogueState:
     last_target_label: str = ""
     last_predicate: str = ""
     last_partner: str = ""
+    interaction_mode: str = "ordinary"
+    mode_strength: int = 0
+    mode_age: int = 0
     turns: list[dict] = field(default_factory=list)
 
 
@@ -314,11 +317,13 @@ class CorpusIndex:
             rate(lambda x:bool(re.search(r"(?:です|ます|でした|ません|すみません|ありがとう)",x))),
             rate(lambda x:len(x)<=12),examples)
 
-    def persona_for_prompt(self, query, intent, n=10):
+    def persona_for_prompt(self, query, intent, n=10, interaction_mode='ordinary'):
         pm=self.persona_model
         preferred=(["questioning","terse","ordinary"] if intent in {"question","choice_followup","ambiguous_followup"} else
                    ["ordinary","terse","playful"] if intent in {"person_opinion","subject_opinion","self_state"} else
                    ["terse","ordinary","playful"])
+        if interaction_mode in self.persona_model.mode_examples:
+            preferred = [interaction_mode] + [x for x in preferred if x != interaction_mode]
         cand=[]
         for rank,mode in enumerate(preferred):
             for line in pm.mode_examples.get(mode,[]): cand.append((self._score_line(query,line)+(len(preferred)-rank)*4,line,mode))
@@ -381,6 +386,59 @@ class CorpusIndex:
             "relationship_examples": [x for _,x in pair_scored[:n]],
             "direct_mentions": [x for _,x in mention_scored[:n]],
         }
+
+
+class ConversationDynamics:
+    """State transition for *how* Hashimoto is currently interacting.
+
+    This never decides semantic intent or factual content. It only carries
+    conversational behavior across turns so persona does not reset every message.
+    """
+
+    MODES = {"ordinary", "terse", "playful", "practical", "questioning"}
+
+    @staticmethod
+    def signal(text: str) -> tuple[str, int]:
+        t=(text or "").strip()
+        if not t:
+            return "ordinary", 0
+        if re.search(r"(?:ww+|ｗｗ+|笑|草|ｷｬ|！？|!\?|ほーん)", t, re.I):
+            return "playful", 3
+        if re.search(r"(?:何時|何分|時に|着く|着き|行ける|行きます|遅れ|予定|今日|明日|来週|集合|予約)", t):
+            return "practical", 3
+        if QUESTION_RE.search(t):
+            return "questioning", 2
+        if len(t) <= 10:
+            return "terse", 1
+        return "ordinary", 1
+
+    def observe(self, state: DialogueState, text: str, speaker_changed: bool=False):
+        proposed, force = self.signal(text)
+        if speaker_changed and state.mode_age >= 2:
+            state.mode_strength = max(0, state.mode_strength - 1)
+
+        # Strong cues switch immediately. Weak cues need repetition or an expired state.
+        if proposed == state.interaction_mode:
+            state.mode_strength = min(5, state.mode_strength + max(1, force))
+            state.mode_age = 0
+        elif force >= 3 or state.mode_strength <= 1 or state.mode_age >= 3:
+            state.interaction_mode = proposed
+            state.mode_strength = min(5, force)
+            state.mode_age = 0
+        else:
+            state.mode_strength -= 1
+            state.mode_age += 1
+        return state.interaction_mode
+
+    def after_reply(self, state: DialogueState, answer: str):
+        # AGO's own output can reinforce a mode, but cannot abruptly invent a new one.
+        proposed, force = self.signal(answer)
+        if proposed == state.interaction_mode:
+            state.mode_strength = min(5, state.mode_strength + 1)
+            state.mode_age = 0
+        else:
+            state.mode_age += 1
+
 
 
 class MeaningResolver:
