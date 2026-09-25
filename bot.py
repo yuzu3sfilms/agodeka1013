@@ -22,12 +22,12 @@ try:
 except Exception:
     SpeakerResolver = None
 
-PROJECT_VERSION = "v14.48"
+PROJECT_VERSION = "v14.49"
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 
 
 class AgoHashimotoBot:
-    """Project AGO v14.48 — person-model conversation core.
+    """Project AGO v14.49 — unified persona + relationship conversation core.
 
     Architecture: resolve once -> retrieve grounded evidence -> one generation.
     No candidate tournament, no downstream semantic re-guessing, no replay override.
@@ -68,12 +68,12 @@ class AgoHashimotoBot:
     def _history_text(self, state: DialogueState):
         out = []
         for t in state.turns[-8:]:
-            who = "相手" if t.get("role") == "user" else "橋本新"
+            who = (t.get("speaker") or "相手") if t.get("role") == "user" else "橋本新"
             out.append(f"{who}: {t.get('text','')}")
         return "\n".join(out) or "なし"
 
     def _prompt(self, meaning, state, speaker):
-        style = self.corpus.style_examples(meaning.raw, 8)
+        persona = self.corpus.persona_for_prompt(meaning.raw, meaning.intent, 10)
         pm = self.corpus.person_model_for_prompt(meaning.target_id, meaning.raw, 8) if meaning.target_id else None
 
         target_block = "なし"
@@ -126,8 +126,16 @@ speaker={speaker or '不明'}
 【対象人物についての実ログ証拠】
 {target_block}
 
-【今回の話題に近い橋本新の実発言・文体例】
-""" + "\n".join(f"- {x}" for x in style) + f"""
+【橋本新の全体人格モデル（実ログから自動集計）】
+発言数={persona['line_count']}
+発言長中央値={persona['median_length']} / p75={persona['p75_length']}
+短文率={persona['terse_rate']} / 丁寧形率={persona['polite_rate']} / 疑問形率={persona['question_rate']} / 笑い率={persona['laughter_rate']}
+今回の会話行為に近い実発言例:
+""" + "\n".join(f"- [{x['mode']}] {x['text']}" for x in persona['examples']) + f"""
+
+【人格合成ルール】
+内容は現在会話と人物別実ログを優先。距離感・長さ・丁寧さ・ふざけ方は全体人格モデルを優先。
+人物モデルにない好き嫌い・経験を全体人格から捏造しない。実例の固有名詞や事実を別場面へコピーしない。
 
 【今回だけの制約】
 {special or '現在の発言へ普通に直接返す。'}
@@ -149,6 +157,13 @@ speaker={speaker or '不明'}
             state = self.states[chat_id]
             speaker = self._speaker(sender_id, sender_display_name)
             meaning = self.resolver.resolve(user_text, state, speaker, self._is_group(chat_id))
+            if self._is_group(chat_id):
+                called = bool(re.search(r"(?:あらくん|橋本|橋本新|顎|アゴ|AGODEKA)", user_text or "", re.I))
+                previous = state.turns[-1] if state.turns else {}
+                same_partner_continuation = previous.get("role") == "assistant" and state.last_partner and state.last_partner == speaker
+                if not called and not same_partner_continuation:
+                    meaning.should_reply = False
+                    meaning.directed = False
             print("meaning:", meaning.__dict__, flush=True)
             if not meaning.should_reply:
                 # Silence is still part of the conversation. Keep it so the next
@@ -156,7 +171,7 @@ speaker={speaker or '不明'}
                 state.turns.append({"role":"user","text":user_text,"speaker":speaker})
                 if len(state.turns) > self.max_history * 2:
                     del state.turns[:-self.max_history * 2]
-                print("generation path: v14_48_silence_context_kept", flush=True)
+                print("generation path: v14_49_silence_context_kept", flush=True)
                 return None
 
             system, user = self._prompt(meaning, state, speaker)
@@ -180,7 +195,7 @@ speaker={speaker or '不明'}
             if len(state.turns) > self.max_history * 2:
                 del state.turns[:-self.max_history * 2]
             self.resolver.commit(state, meaning, speaker)
-            print("generation path: v14_48_person_model_single_pass", flush=True)
+            print("generation path: v14_49_persona_relationship_single_pass", flush=True)
             print("reply:", answer, flush=True)
             return answer
 

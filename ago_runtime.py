@@ -73,6 +73,18 @@ class PersonModel:
     evidence_strength: str = "none"
 
 
+@dataclass
+class PersonaModel:
+    line_count: int = 0
+    median_length: int = 0
+    p75_length: int = 0
+    question_rate: float = 0.0
+    laughter_rate: float = 0.0
+    polite_rate: float = 0.0
+    terse_rate: float = 0.0
+    mode_examples: dict[str, list[str]] = field(default_factory=dict)
+
+
 class CorpusIndex:
     """Raw-log-backed identity, relationship and style store.
 
@@ -90,6 +102,7 @@ class CorpusIndex:
         self.exchanges = defaultdict(list)
         self.direct_mentions = defaultdict(list)
         self.person_models: dict[str, PersonModel] = {}
+        self.persona_model = PersonaModel()
         self._load()
 
     def _candidate_files(self):
@@ -178,6 +191,7 @@ class CorpusIndex:
             self._parse(p)
         self._build_aliases()
         self._build_evidence()
+        self._build_persona_model()
         self._build_person_models()
 
     def resolve_person(self, token: str, current_speaker: str = "") -> tuple[str, str]:
@@ -268,6 +282,54 @@ class CorpusIndex:
                     continue
                 c[tok] += 1
         return [w for w,n in c.most_common(limit) if n >= 2]
+
+    @staticmethod
+    def _percentile(values, q):
+        if not values: return 0
+        xs=sorted(values); return xs[int(round((len(xs)-1)*q))]
+
+    @staticmethod
+    def _behavior_mode(line):
+        t=(line or "").strip()
+        if re.search(r"(?:何時|何分|時に|着き|行け|行きます|遅れ|すみません|大丈夫|予定|今日|明日|来週)", t): return "practical"
+        if re.search(r"(?:ww+|ｗｗ+|笑|ｷｬ|ほーん|草)", t, re.I): return "playful"
+        if QUESTION_RE.search(t): return "questioning"
+        if len(t)<=12: return "terse"
+        return "ordinary"
+
+    def _build_persona_model(self):
+        lines=[x.strip() for x in self.hashimoto_lines if x and not MEDIA_RE.search(x)]
+        lengths=[len(x) for x in lines]; buckets=defaultdict(list)
+        for x in lines: buckets[self._behavior_mode(x)].append(x)
+        def rate(pred): return round(sum(1 for x in lines if pred(x))/max(1,len(lines)),3)
+        examples={}
+        for mode,vals in buckets.items():
+            seen=set(); out=[]
+            for x in vals:
+                if x not in seen and 2<=len(x)<=90: seen.add(x); out.append(x)
+                if len(out)>=120: break
+            examples[mode]=out
+        self.persona_model=PersonaModel(len(lines),self._percentile(lengths,.5),self._percentile(lengths,.75),
+            rate(lambda x:bool(QUESTION_RE.search(x))),rate(lambda x:bool(re.search(r"(?:ww+|ｗｗ+|笑)",x,re.I))),
+            rate(lambda x:bool(re.search(r"(?:です|ます|でした|ません|すみません|ありがとう)",x))),
+            rate(lambda x:len(x)<=12),examples)
+
+    def persona_for_prompt(self, query, intent, n=10):
+        pm=self.persona_model
+        preferred=(["questioning","terse","ordinary"] if intent in {"question","choice_followup","ambiguous_followup"} else
+                   ["ordinary","terse","playful"] if intent in {"person_opinion","subject_opinion","self_state"} else
+                   ["terse","ordinary","playful"])
+        cand=[]
+        for rank,mode in enumerate(preferred):
+            for line in pm.mode_examples.get(mode,[]): cand.append((self._score_line(query,line)+(len(preferred)-rank)*4,line,mode))
+        cand.sort(key=lambda z:z[0],reverse=True); out=[]; seen=set()
+        for _,line,mode in cand:
+            if line in seen: continue
+            seen.add(line); out.append({"mode":mode,"text":line})
+            if len(out)>=n: break
+        return {"line_count":pm.line_count,"median_length":pm.median_length,"p75_length":pm.p75_length,
+                "question_rate":pm.question_rate,"laughter_rate":pm.laughter_rate,"polite_rate":pm.polite_rate,
+                "terse_rate":pm.terse_rate,"examples":out}
 
     def _build_person_models(self):
         people = set(self.name_to_aliases) | set(self.exchanges) | set(self.direct_mentions)
