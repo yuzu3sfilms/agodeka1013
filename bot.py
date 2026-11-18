@@ -7,7 +7,13 @@ from collections import defaultdict
 
 from openai import OpenAI
 
-from ago_runtime import CorpusIndex, DialogueState, MeaningResolver, ConversationDynamics
+from ago_runtime import (
+    PersonaArchive,
+    DialogueState,
+    MeaningResolver,
+    ContractBuilder,
+    PersonaGate,
+)
 
 try:
     from shutdown_state import ShutdownStateStore
@@ -22,36 +28,51 @@ try:
 except Exception:
     SpeakerResolver = None
 
-PROJECT_VERSION = "v14.52"
+PROJECT_VERSION = "v14.54"
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 
 
 class AgoHashimotoBot:
-    """Project AGO v14.52 — structure-grounded persona response core.
+    """Project AGO v14.54 — archive-native persona core.
 
-    Architecture: resolve once -> retrieve grounded evidence -> one generation.
-    No candidate tournament, no downstream semantic re-guessing, no replay override.
+    The model is not asked to invent Hashimoto's personality from a prompt.
+    Real historical episodes and self-expression data determine the response
+    contract first; the model only minimally edits those sources to fit the
+    current turn. A post-generation gate rejects answers that drift too far.
     """
 
     def __init__(self):
         self.model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
-        self.client = OpenAI(api_key=os.environ["GROQ_API_KEY"], base_url="https://api.groq.com/openai/v1")
-        self.corpus = CorpusIndex(roots=["data", "."])
-        self.resolver = MeaningResolver(self.corpus)
-        self.dynamics = ConversationDynamics()
+        self.client = OpenAI(
+            api_key=os.environ["GROQ_API_KEY"],
+            base_url="https://api.groq.com/openai/v1",
+        )
+        self.archive = PersonaArchive()
+        self.resolver = MeaningResolver(self.archive)
+        self.contracts = ContractBuilder(self.archive)
         self.states = defaultdict(DialogueState)
         self.locks = defaultdict(threading.RLock)
         self.shutdown_store = ShutdownStateStore()
         self.speaker_resolver = SpeakerResolver() if SpeakerResolver else None
-        self.max_history = int(os.environ.get("AGO_HISTORY", "12"))
-        print("bot_init:", {"version": PROJECT_VERSION, "messages": len(self.corpus.messages), "hashimoto_lines": len(self.corpus.hashimoto_lines), "people": len(self.corpus.name_to_aliases)}, flush=True)
+        self.max_history = int(os.environ.get("AGO_HISTORY", "14"))
+        meta = self.archive.source_meta
+        print("bot_init:", {
+            "version": PROJECT_VERSION,
+            "raw_line_messages": (meta.get("line_raw") or {}).get("message_count"),
+            "raw_episodes": len(self.archive.raw_episodes),
+            "derived_context_episodes": len(self.archive.derived_episodes),
+            "ai_dataset_statements": len(self.archive.self_statements),
+            "hashimoto_utterances": len(self.archive.hashimoto_utterances),
+        }, flush=True)
 
     def set_shutdown(self, chat_id: str, value: bool = True):
         self.shutdown_store.set(chat_id, bool(value))
 
     def is_shutdown(self, chat_id: str) -> bool:
-        try: return bool(self.shutdown_store.get(chat_id))
-        except Exception: return False
+        try:
+            return bool(self.shutdown_store.get(chat_id))
+        except Exception:
+            return False
 
     @staticmethod
     def _is_group(chat_id: str) -> bool:
@@ -60,187 +81,199 @@ class AgoHashimotoBot:
     def _speaker(self, sender_id, display):
         if self.speaker_resolver:
             try:
-                p = self.speaker_resolver.resolve(sender_id=sender_id, display_name=display)
+                p = self.speaker_resolver.resolve(
+                    sender_id=sender_id, display_name=display
+                )
                 return p.canonical_name or p.display_name or display or sender_id or ""
             except Exception:
                 pass
         return display or sender_id or ""
 
-    def _history_text(self, state: DialogueState):
-        out = []
+    @staticmethod
+    def _history_text(state: DialogueState) -> str:
+        rows = []
         for t in state.turns[-8:]:
             who = (t.get("speaker") or "相手") if t.get("role") == "user" else "橋本新"
-            out.append(f"{who}: {t.get('text','')}")
-        return "\n".join(out) or "なし"
+            rows.append(f"{who}: {t.get('text','')}")
+        return "\n".join(rows) or "なし"
 
-    def _prompt(self, meaning, state, speaker):
-        behavior = self.corpus.response_pattern_for_prompt(
-            meaning.raw, meaning.stimulus_class, speaker, 6, meaning.stimulus_shape
+    @staticmethod
+    def _episode_text(e: dict | None, label: str) -> str:
+        if not e:
+            return f"{label}: なし"
+        ctx = []
+        for t in e.get("context", [])[-5:]:
+            who = "橋本新" if t.get("is_hashimoto") else t.get("sender", "相手")
+            ctx.append(f"{who}: {t.get('text','')}")
+        return (
+            f"{label} [source={e.get('source')} id={e.get('id')}]\n"
+            + "\n".join(ctx)
+            + f"\n橋本新の実返答: {e.get('reply','')}"
         )
-        persona = self.corpus.persona_for_prompt(
-            meaning.raw, meaning.intent, 3, state.interaction_mode, behavior.get("response_modes")
-        )
-        pm = self.corpus.person_model_for_prompt(meaning.target_id, meaning.raw, 8) if meaning.target_id else None
 
-        target_block = "なし"
-        if meaning.target_id:
-            target_block = f"target_id={meaning.target_id}\n呼び方={meaning.target_label}\n"
-            if pm:
-                target_block += (
-                    f"人物モデル証拠強度={pm['evidence_strength']}\n"
-                    f"直接会話数={pm['interaction_count']} / 直接言及数={pm['mention_count']}\n"
-                    f"aliases={', '.join(pm['aliases']) or 'なし'}\n"
-                    f"反復話題ヒント={', '.join(pm['recurring_terms']) or 'なし'}\n"
-                )
-                if pm['relationship_examples']:
-                    target_block += "実際の相手別会話例:\n" + "\n".join(
-                        f"相手: {x['other']}\n橋本新: {x['hashimoto']}" for x in pm['relationship_examples']
-                    )
-                if pm['direct_mentions']:
-                    target_block += "\n橋本新本人による直接言及:\n" + "\n".join(f"- {x}" for x in pm['direct_mentions'])
+    def _build_prompt(self, contract, state: DialogueState, speaker: str):
+        m = contract.meaning
+        primary = self._episode_text(contract.primary, "PRIMARY")
+        backups = "\n\n".join(
+            self._episode_text(e, f"BACKUP{i+1}") for i, e in enumerate(contract.backups)
+        ) or "なし"
+        content = "\n".join(f"- {x}" for x in contract.content_sources[:6]) or "なし"
 
-        special = ""
-        if meaning.intent == "self_state":
-            special = "自己言及・変な問いも会話上のノリとして直接返す。哲学説明やAIの能力説明に変換しない。過去反応ペアの返し方を優先する。"
-        elif meaning.intent == "person_opinion":
-            special = "人物評価。人物モデルの証拠強度・相手別会話・直接言及から読み取れる範囲だけで答える。証拠が弱ければ断定を弱める。『好き』『嫌い』『どうでもいい』『微妙』を資料なしで創作しない。"
-        elif meaning.intent == "subject_opinion":
-            special = f"対象『{meaning.target_label}』への意見。人物辞書にない対象なので人物関係を捏造せず、橋本新の実ログ文体を使って普通に答える。"
-        elif meaning.intent == "ambiguous_followup":
-            special = "『どれ？』等だが直前に選択肢が確認できない。勝手にA/Bを作らず、『何が？』程度の自然な短い確認にする。"
-        elif meaning.intent == "choice_followup":
-            special = "直近会話に実在する選択肢だけを参照して答える。新しい選択肢を捏造しない。"
+        # This prompt intentionally defines the model as an editor rather than a
+        # persona actor. The persona already lives in the archive sources.
+        system = """あなたはProject AGOの「最小編集器」です。人格を創作する役ではありません。
+橋本新の人格・語彙・間・温度は、下に与える本人の実LINE返答と本人データセットだけが根拠です。
 
-        system = """あなたはLINE上の橋本新を、実際の過去ログに基づいて再現するProject AGO。
-便利AI、ChatGPT、カウンセラーとして振る舞わない。
-現在の意味解析結果は上流で確定済み。人物・主語・述語を再解釈しない。
-資料にない過去経験、好き嫌い、関係性、感情、予定を発明しない。
+仕事は1つだけです。
+PRIMARYの橋本新の実返答を、現在の会話に必要な最小限だけ編集して返してください。
+PRIMARYが内容的に使えない場合だけBACKUPを使います。
+人物・価値観については「本人発言の内容根拠」を優先します。
 
-最重要なのは「何を説明すべきか」ではなく「橋本新ならこの刺激へどう返すか」。
-stimulus→response実例の上位ほど強い行動アンカーとして扱い、内容ではなく返し方・短さ・間・温度を移す。
-ユーザー文を言い換えてから答えない。質問を復唱しない。前置き・但し書き・一般論を足さない。
-変な問い、自己言及、雑談も、必要以上に意味を深掘りせずLINEの一発言として返す。
-実例が短い反応なら短く返し、実例が普通の説明なら必要な範囲だけ説明する。
-全体人格例は語尾コピー用ではなく距離感・テンポの補助資料。無関係な固有名詞や話題は移さない。
-通常1文、必要なら2文。候補一覧・解説・メタ説明は出さず返答本文だけ出す。"""
+絶対禁止:
+- ChatGPTらしく答え直す
+- 丁寧で自然な日本語へ改善する
+- ユーザーの質問を復唱してから答える
+- 一般論、説明、但し書き、カウンセリングを足す
+- 実資料にない好き嫌い・関係性・予定・経験・理由を作る
+- 「それで何か〜するの？」「もう少し教えて」など会話を広げるためだけの質問を作る
 
-        user = f"""【確定した現在ターン】
-intent={meaning.intent}
-target={meaning.target_id or 'なし'}
-predicate={meaning.predicate or 'なし'}
-inherited_predicate={meaning.inherited_predicate}
-stimulus_class={meaning.stimulus_class or 'なし'}
-stimulus_shape={meaning.stimulus_shape or 'なし'}
-user={meaning.raw}
+橋本本人の変な語順、短さ、雑さ、妙な丁寧さ、記号、絵文字、言い回しは直さない。
+原則としてPRIMARYの文型・長さ・テンポを保つ。
+出力はLINEの返答本文だけ。解説、引用符、ラベルは出さない。"""
+
+        intent_rule = ""
+        if m.intent == "person_opinion":
+            intent_rule = (
+                "人物評価。本人発言の内容根拠から言える範囲だけ返す。"
+                "感情ラベルを推測で追加しない。内容根拠が直接的でなくても、"
+                "『わからない』というAI的逃げ方より、本人の実際の呼び方・距離感・反応を使う。"
+            )
+        elif m.intent == "self_state":
+            intent_rule = (
+                "自己言及の変な問い。哲学やAIの意識の説明をしない。"
+                "PRIMARYが短い反応なら、その短い反応のまま返す。"
+            )
+        elif m.intent == "subject_opinion":
+            intent_rule = (
+                "抽象的な意見。本人データセットに該当する本人発言があれば、"
+                "その考え方と言葉を優先し、一般論を作らない。"
+            )
+        elif m.intent == "ambiguous_followup":
+            intent_rule = "直前に選択肢がなければ勝手に選択肢を作らない。短く聞き返す。"
+        elif m.intent == "scheduling":
+            intent_rule = "予定の会話。現在会話にある時刻だけを使う。新しい時刻や予定を作らない。"
+        else:
+            intent_rule = "現在の発言へ直接返す。会話を広げるためだけの質問を足さない。"
+
+        user = f"""【現在の確定意味】
+intent={m.intent}
+target={m.target_id or 'なし'}
+predicate={m.predicate or 'なし'}
+act={m.act}
 speaker={speaker or '不明'}
+user={m.raw}
 
-【直近会話】
+【直近の実会話】
 {self._history_text(state)}
 
-【対象人物についての実ログ証拠】
-{target_block}
+【PRIMARY: 最優先の実会話エピソード】
+{primary}
 
-【最優先：実ログから学習した stimulus → response 行動証拠】
-stimulus_class={behavior['stimulus_class']}
-stimulus_shape={behavior.get('stimulus_shape','なし')}
-同クラス実例数={behavior['count']}
-橋本の応答mode分布={behavior['response_modes']}
-橋本の応答長中央値={behavior['median_response_length']}
-類似する実際の反応ペア:
-""" + "\n".join(
-    f"- 相手: {x['stimulus']}\n  橋本新: {x['response']}" for x in behavior['examples']
-) + f"""
+【BACKUP: PRIMARYが内容的に不適切な時だけ】
+{backups}
 
-【行動モデルの使い方】
-上から順に強いアンカー。特にstimulus_shapeが同じ実例は、返答の構造・短さ・温度の第一根拠にする。
-実例の話題・固有名詞・事実は現在へコピーしない。
-意味解析・人物モデルと衝突した場合だけ、意味解析・人物モデルを優先する。
-「質問だから質問で返す」のような機械的模倣はしない。ユーザー側の文法と橋本側の返答modeは別物。
+【本人発言の内容根拠】
+{content}
 
-【現在の会話人格状態】
-interaction_mode={state.interaction_mode}
-mode_strength={state.mode_strength}
-mode_age={state.mode_age}
-この状態は内容・事実を決めない。返答のテンポ、距離感、丁寧さ、ふざけ方だけに使う。
+【今回の編集制約】
+{intent_rule}
+目標文字数は約{contract.target_chars}文字。tone={contract.tone}。
 
-【橋本新の全体人格モデル（実ログから自動集計）】
-発言数={persona['line_count']}
-発言長中央値={persona['median_length']} / p75={persona['p75_length']}
-短文率={persona['terse_rate']} / 丁寧形率={persona['polite_rate']} / 疑問形率={persona['question_rate']} / 笑い率={persona['laughter_rate']}
-今回の会話行為に近い実発言例:
-""" + "\n".join(f"- [{x['mode']}] {x['text']}" for x in persona['examples']) + f"""
-
-【人格合成ルール】
-1. 内容・対象・事実 = 確定意味解析と人物別実ログ。
-2. 返し方・短さ・反応の型 = stimulus→response上位実例。
-3. 距離感・丁寧さ・ふざけ方 = 持続中のAGO会話状態と全体人格モデル。
-ユーザーの疑問符だけでAGOを質問調にしない。
-上位実例が短い反応なら、説明を追加して“賢く”しない。
-下流の証拠から上流の意味を変更しない。人物モデルにない好き嫌い・経験を捏造しない。
-
-【今回だけの制約】
-{special or '現在の発言へ普通に直接返す。'}
-
-橋本新として返答本文だけ。"""
+PRIMARYの橋本新の返答を「別人が自然に書き直す」のではなく、橋本本人の文章を現在へ移植するつもりで最小編集してください。
+返答本文だけ。"""
         return system, user
 
     @staticmethod
-    def _clean(text):
+    def _clean(text: str) -> str:
         t = (text or "").strip()
-        t = re.sub(r"^(?:候補\d+[:：]\s*)", "", t)
+        t = re.sub(r"^(?:REPLY|返答|回答)\s*[:：]\s*", "", t, flags=re.I)
         t = t.strip('"「」')
         return t[:300].strip()
 
-    def reply(self, chat_id: str, user_text: str, sender_id: str | None = None, sender_display_name: str | None = None) -> str | None:
+    def _generate(self, contract, state, speaker):
+        if contract.can_replay and contract.primary:
+            answer = (contract.primary.get("reply") or "").strip()
+            return answer, "archive_replay", "not_needed"
+
+        system, user = self._build_prompt(contract, state, speaker)
+        try:
+            res = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=float(os.environ.get("TEMPERATURE", "0.18")),
+                max_completion_tokens=int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "120")),
+                extra_body={"reasoning_effort": os.environ.get("GROQ_REASONING_EFFORT", "low")},
+            )
+            candidate = self._clean(res.choices[0].message.content or "")
+        except Exception as e:
+            print("Groq error:", repr(e), flush=True)
+            return contract.fallback or ERROR_FALLBACK, "archive_fallback", "groq_error"
+
+        ok, reason = PersonaGate.validate(candidate, contract, contract.meaning.raw)
+        if ok:
+            return candidate, "minimal_edit", reason
+        return contract.fallback or ERROR_FALLBACK, "archive_fallback", reason
+
+    def reply(
+        self,
+        chat_id: str,
+        user_text: str,
+        sender_id: str | None = None,
+        sender_display_name: str | None = None,
+    ) -> str | None:
         with self.locks[chat_id]:
             if self.is_shutdown(chat_id):
                 return None
+
             state = self.states[chat_id]
             speaker = self._speaker(sender_id, sender_display_name)
-            meaning = self.resolver.resolve(user_text, state, speaker, self._is_group(chat_id))
-            speaker_changed = bool(state.last_partner and state.last_partner != speaker)
-            self.dynamics.observe(state, user_text, speaker_changed=speaker_changed)
-            if self._is_group(chat_id):
-                called = bool(re.search(r"(?:あらくん|橋本|橋本新|顎|アゴ|AGODEKA)", user_text or "", re.I))
-                previous = state.turns[-1] if state.turns else {}
-                same_partner_continuation = previous.get("role") == "assistant" and state.last_partner and state.last_partner == speaker
-                if not called and not same_partner_continuation:
-                    meaning.should_reply = False
-                    meaning.directed = False
+            meaning = self.resolver.resolve(
+                user_text, state, speaker, self._is_group(chat_id)
+            )
             print("meaning:", meaning.__dict__, flush=True)
+
             if not meaning.should_reply:
-                # Silence is still part of the conversation. Keep it so the next
-                # speaker's ellipsis/follow-up sees what was actually said.
-                state.turns.append({"role":"user","text":user_text,"speaker":speaker})
+                state.turns.append({"role": "user", "text": user_text, "speaker": speaker})
                 if len(state.turns) > self.max_history * 2:
                     del state.turns[:-self.max_history * 2]
-                print("generation path: v14_52_silence_context_kept", flush=True)
+                print("generation path: v14_54_archive_silence", flush=True)
                 return None
 
-            system, user = self._prompt(meaning, state, speaker)
-            try:
-                res = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role":"system","content":system},{"role":"user","content":user}],
-                    temperature=float(os.environ.get("TEMPERATURE", "0.58")),
-                    max_completion_tokens=int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "256")),
-                    extra_body={"reasoning_effort": os.environ.get("GROQ_REASONING_EFFORT", "low")},
-                )
-                answer = self._clean(res.choices[0].message.content or "")
-                if not answer:
-                    answer = ERROR_FALLBACK
-            except Exception as e:
-                print("Groq error:", repr(e), flush=True)
-                answer = ERROR_FALLBACK
+            contract = self.contracts.build(meaning, state, speaker)
+            dbg = contract.debug
+            print("persona_contract:", {
+                "confidence": contract.source_confidence,
+                "tone": contract.tone,
+                "target_chars": contract.target_chars,
+                "can_replay": contract.can_replay,
+                "top_hits": dbg.get("top_hits", [])[:3],
+                "content_sources": dbg.get("content_sources", [])[:3],
+            }, flush=True)
 
-            state.turns.append({"role":"user","text":user_text,"speaker":speaker})
-            state.turns.append({"role":"assistant","text":answer})
+            answer, path, gate = self._generate(contract, state, speaker)
+            answer = self._clean(answer) or ERROR_FALLBACK
+
+            state.turns.append({"role": "user", "text": user_text, "speaker": speaker})
+            state.turns.append({"role": "assistant", "text": answer})
             if len(state.turns) > self.max_history * 2:
                 del state.turns[:-self.max_history * 2]
             self.resolver.commit(state, meaning, speaker)
-            self.dynamics.after_reply(state, answer)
-            print("conversation_mode:", {"mode": state.interaction_mode, "strength": state.mode_strength, "age": state.mode_age}, flush=True)
-            print("generation path: v14_52_structure_grounded_single_pass", flush=True)
+
+            print("generation path:", f"v14_54_{path}", flush=True)
+            print("persona_gate:", gate, flush=True)
             print("reply:", answer, flush=True)
             return answer
 
