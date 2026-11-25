@@ -27,6 +27,7 @@ def topic(text):
 def explicit_address(text):
     t=(text or '').strip()
     if re.search(r'@'+SELF+r'(?:\s|$|[、,:：])',t,re.I): return True
+    if re.fullmatch(SELF+r'(?:さん|くん)?(?:は|も|って)[？?]+',t,re.I): return True
     if THIRD.match(t): return False
     return bool(VOCATIVE.search(t) or re.fullmatch(SELF+r'(?:さん|くん)?[？?！!]*',t,re.I))
 
@@ -38,21 +39,23 @@ def other_address(text, aliases=None):
         if len(a)>=2: names.add(a)
     for a in sorted(names,key=len,reverse=True):
         if len(a)<2: continue
+        if re.fullmatch(re.escape(a)+r'(?:さん|くん)?(?:は|も|って)[？?]+',t,re.I): return True
         if re.match(r'^@?'+re.escape(a)+r'(?:さん|くん)?(?:[、,:：\s]|[？?！!]|$|(?:は|って)?(?:今|何|どう|いつ|どこ|いる|おる|来|行|教|聞|見|知|元気|最近))',t): return True
     return False
 
 def features(text,speaker,active,continuing):
-    return [f'act:{dialogue_act(text)}',f'topic:{topic(text)}',f'active:{int(active)}',f'continuing:{int(continuing)}',f'speaker:{speaker}']
+    return [f'active:{int(active)}',f'continuing:{int(continuing)}',f'speaker:{speaker}']
 
 class ParticipationModel:
     def __init__(self,path=None,rng=None,clock=None):
         self.rng=rng or random.Random()
         self.clock=clock or time.time
-        candidates=[path,os.environ.get('AGO_PARTICIPATION_MODEL'),str(Path(__file__).with_name('ago_participation_v14_56.json')),'data/ago_participation_v14_56.json']
+        candidates=[path,os.environ.get('AGO_PARTICIPATION_MODEL'),str(Path(__file__).with_name('ago_participation_v14_65.json')),'data/ago_participation_v14_65.json']
         self.data={}
         for p in candidates:
             if p and Path(p).is_file():
                 self.data=json.loads(Path(p).read_text(encoding='utf-8'));break
+        if self.data.get('schema')!='ago-participation-v14-65': raise ValueError('Missing or incompatible participation data v14.65')
         self.counts=self.data.get('counts',{})
         self.base=self.data.get('base',[0,0])
     def probability(self,text,speaker,active,continuing):
@@ -94,7 +97,6 @@ class ParticipationModel:
         if len(t)<10 or act in {'short_reaction','thanks','apology','scheduling'}:
             return result(False,'low_information_or_private_exchange')
         if os.getenv('AGO_SPONTANEOUS','1')=='0': return result(False,'spontaneous_disabled')
-        if topic(t)=='other': return result(False,'no_topic_signal')
         recent=[x for x in state.turns[-8:] if x.get('role')=='user' and 0<=now-x.get('at',0)<=180]
         if len(recent)<2 or len({x.get('speaker') for x in recent}|{speaker})<2: return result(False,'not_enough_group_context')
         if state.last_spontaneous_at and now-state.last_spontaneous_at<600:

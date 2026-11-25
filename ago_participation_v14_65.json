@@ -1,0 +1,68 @@
+{
+  "schema": "ago-participation-v14-65",
+  "base": [
+    34865,
+    849
+  ],
+  "heldout": [
+    7815,
+    173
+  ],
+  "counts": {
+    "active:0": [
+      32836,
+      185
+    ],
+    "continuing:0": [
+      34574,
+      629
+    ],
+    "speaker:Reiji Shioda": [
+      10834,
+      415
+    ],
+    "speaker:Ryo Sekiguchi": [
+      2397,
+      53
+    ],
+    "speaker:村田": [
+      10781,
+      142
+    ],
+    "speaker:坂口": [
+      8419,
+      236
+    ],
+    "speaker:中山 貴文": [
+      1615,
+      2
+    ],
+    "speaker:LINE英語通訳": [
+      114,
+      0
+    ],
+    "speaker:LINE中国語通訳": [
+      108,
+      0
+    ],
+    "speaker:りんな": [
+      443,
+      0
+    ],
+    "speaker:LINE中国語（繁）通訳": [
+      143,
+      0
+    ],
+    "active:1": [
+      2029,
+      664
+    ],
+    "continuing:1": [
+      291,
+      220
+    ]
+  },
+  "parsed_messages": 99391,
+  "ambiguous_transitions_excluded": 4514,
+  "definition": "next distinct speaker primary proxy within 5min, no read receipts; chronological 80/20; ambiguous endpoints excluded; context-only features, not calibrated"
+}

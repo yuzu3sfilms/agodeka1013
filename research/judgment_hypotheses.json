@@ -1,0 +1,34 @@
+{
+  "schema": "ago-judgment-hypotheses-v14.61",
+  "status": "exploratory_not_deployable",
+  "evidence_policy": "References are sample_no values in contrast_annotations.jsonl. Pre-2023 supports candidate construction; 2023+ is exploratory cross-period comparison, not an independent blind test. No claim of internal thought or stable personality.",
+  "hypotheses": [
+    {
+      "id": "mechanism_and_conditions",
+      "candidate": "熟知している対象について比較や疑問が生じた場合、単一の結論を述べるよりも、複数の評価軸や結果を生む機構に分けて説明することがある。",
+      "conditions": ["本人が説明する立場にある", "比較対象・疑問・具体的な機構が文脈から確定している", "知識を裏付ける実例が存在する"],
+      "support_pre_2023": [14, 21, 22, 27],
+      "consistent_later": [33],
+      "limits_or_alternatives": [15, 40, 44],
+      "do_not_infer": "全分野に詳しい、常に長文、常に正確、一般的な慎重さが人格固有である、とは推定しない。質問者や説明者などの役割差は未調整。"
+    },
+    {
+      "id": "transform_shared_frame",
+      "candidate": "相手が作った冗談の設定や比喩を受け取り、それを圧縮・拡張・反転することで参加する場合がある。",
+      "conditions": ["遊びの枠組みが直前の文脈にある", "どの要素を変形するかが分かる", "本気の相談や不明な画像の解釈と混同しない"],
+      "support_pre_2023": [1, 10, 12, 24],
+      "consistent_later": [],
+      "limits_or_alternatives": [4, 7, 18, 47],
+      "do_not_infer": "造語・模倣・冗談が橋本だけに特有とはいえない。他者にも見られる。定型句の優先登録や毎回の冗談生成は禁止。後年の再現性は未確認。"
+    },
+    {
+      "id": "coordination_and_repair",
+      "candidate": "集まりの段取りで本人が遅れたり誤解が生じたりした場合、自分の状況を述べ、必要に応じて謝罪や具体的な提案修正を行う。",
+      "conditions": ["実際に集まりの調整中", "本人に関係する遅延・誤解・調整上の問題が確認できる", "位置・時刻・予定は入力や記憶から根拠づけられる"],
+      "support_pre_2023": [8, 15, 19],
+      "consistent_later": [38, 39, 43, 45, 46],
+      "limits_or_alternatives": [25, 35, 48],
+      "do_not_infer": "前期3件は具体情報の共有・確認を支持するが謝罪傾向の証明ではない。後期に謝罪例があるものの、他者の立場・責任が等しくない。本人の現在地や予定を生成しない。冗談上の謝罪を罪悪感と断定しない。"
+    }
+  ]
+}

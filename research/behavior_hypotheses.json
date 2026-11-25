@@ -1,0 +1,63 @@
+{
+  "schema": "ago-behavior-hypotheses-v14.57-research",
+  "status": "exploratory; not runtime rules; not a validated psychological profile",
+  "evidence_convention": "All line numbers are 1-based start lines in the original LINE export whose SHA256 is in ago_evidence_index.json.gz. Context may span long intervals. Future lines are for analysis only. Primary_proxy is a display-name proxy, not verified identity.",
+  "hypotheses": [
+    {
+      "id": "H01",
+      "domain": "judgment and explanation",
+      "observation": "Training-related questions can trigger condition-dependent explanation, rather than an unconditional judgment or a one-word reaction. The speaker distinguishes uncertainty from specific observations.",
+      "support": [
+        {"line":59885,"date":"2019-09-11","context_lines":[59881,59884],"interpretation":"Responds to a concern about squats with conditional advice and concrete examples."},
+        {"line":59915,"date":"2019-09-11","context_lines":[59913,59914],"interpretation":"Distinguishes two plausible categories, jokes about own ambiguity; next message 59921 gives a specific basis."},
+        {"line":111120,"date":"2024-12-14","context_lines":[111100,111106,111119],"interpretation":"Compares a bodybuilder estimate with a reference case and explicitly qualifies by height. Media contents cannot be reconstructed."}
+      ],
+      "counter_or_boundary": [{"line":60096,"date":"2019-09-15","interpretation":"Explicitly says unfamiliar with HMB and has not used it. Domain interest does not imply all domain knowledge."}],
+      "runtime_implication": "Prefer concrete observations and conditions when the question and available knowledge warrant them; do not import historical advice as current scientific fact or always produce long answers.",
+      "confidence":"moderate for observed behavior; not a global cognitive trait"
+    },
+    {
+      "id":"H02","domain":"uncertainty and repair",
+      "observation":"Sometimes identifies what is unknown, asks a precise question or corrects a previous message, rather than inventing an answer.",
+      "support":[{"line":60096,"date":"2019-09-15","interpretation":"States lack of personal experience; reference to researching it is historical only."},{"line":107499,"date":"2024-06-14","context_lines":[107496,107497,107498],"interpretation":"Asks whether a model kit is online-reservation-only or available in store, giving the reason for uncertainty."},{"line":98240,"date":"2023-01-03","context_lines":[98238,98239],"interpretation":"Admits a location error; next 98244 explains the misunderstanding."}],
+      "counter_or_boundary":[{"line":99505,"date":"2023-04-08","interpretation":"When a choice does not matter to the speaker, a brief noncommittal answer may be enough."}],
+      "runtime_implication":"Distinguish missing factual evidence, ambiguous referents, a genuine preference, and no preference. Do not use a universal uncertain reply or promise to investigate without tools.","confidence":"moderate"
+    },
+    {
+      "id":"H03","domain":"practical conversation",
+      "observation":"In logistics, missing time/place and the speaker's own status can be important; the behavior includes clarifying constraints, correcting errors and apologizing, not always accepting the proposal.",
+      "support":[{"line":76911,"date":"2020-12-10","context_lines":[76908,76909,76910],"interpretation":"Apology plus quantified lateness."},{"line":100382,"date":"2023-06-21","interpretation":"Asks for time, place and end time together."},{"line":98240,"date":"2023-01-03","context_lines":[98238,98239],"interpretation":"Reports wrong meeting point instead of changing the subject."}],
+      "counter_or_boundary":[{"line":74648,"date":"2020-09-28","interpretation":"Says either is fine when given a choice."},{"line":99505,"date":"2023-04-08","interpretation":"Brief acceptance/non-preference."}],
+      "runtime_implication":"Track proposal, agreement, revision, unresolved constraints and repair as distinct dialogue actions. A simulation cannot truthfully claim real attendance, physical location or a personal schedule without current evidence.","confidence":"moderate for practical actions"
+    },
+    {
+      "id":"H04","domain":"humor and discourse adaptation",
+      "observation":"Humor can depend on reusing the immediately preceding wording or associating the topic with a personal interest. Such one-off behavior is not a stable catchphrase or a template for every new topic.",
+      "support":[{"line":102008,"date":"2023-10-08","context_lines":[102006,102007],"interpretation":"Exact repetition of Murata's 'ほーん'; only one occurrence in the primary proxy group. Plausible echo, not a proven intention."},{"line":41554,"date":"2018-06-11","context_lines":[41552,41553],"interpretation":"Connects the metaphor '沼' from guitar to training and distinguishes the two. Subsequent 41557 is laughter after another participant's joke."},{"line":81192,"date":"2021-03-02","interpretation":"Responds within an explicitly introduced dream scenario; its content must not be stored as an actual past event."}],
+      "counter_or_boundary":[{"line":107499,"date":"2024-06-14","interpretation":"A straightforward practical question about the speaker's hobby does not call for forced humor."}],
+      "runtime_implication":"Annotate quotation, imitation candidate, play frame, self-correction and spontaneous utterance separately. Never promote a one-off line to a default fallback.","confidence":"high for the repeated text; moderate for contextual interpretation"
+    },
+    {
+      "id":"H05","domain":"relationship and address",
+      "observation":"Observed forms of address differ by person, but they are not measurements of affection or intimacy.",
+      "support":[{"line":102009,"date":"2023-10-08","interpretation":"Uses ムタファ in a practical question."},{"line":102836,"date":"2023-12-15","interpretation":"Uses 関口さん and ソンタム=ムタファ in the same planning discussion."},{"line":102852,"date":"2023-12-15","interpretation":"Uses 塩田さん and asks about end-of-year availability."}],
+      "counter_or_boundary":[{"line":66261,"date":"2020-01-19","context_lines":[66262],"interpretation":"The remark '尊敬します' is followed by the recipient's 'バカにしてるよね'; this can be playful or sarcastic, not a general endorsement."}],
+      "runtime_implication":"Use observed name forms and interaction style as contextual evidence. Do not derive stable like/dislike, respect or current personal information from proximity or honorifics.","confidence":"high for address-form counts; low for inferred relationship evaluation"
+    },
+    {
+      "id":"H06","domain":"expressed values over time",
+      "observation":"The source contains both enjoyment-focused remarks and contrasting statements emphasizing effort or contribution. These should remain contextual, temporally situated positions rather than a single invariant doctrine.",
+      "support":[{"line":94410,"date":"2022-08-23","context_lines":[94408,94409],"interpretation":"Does not endorse the proposed framing about goals/being unusual; says bodybuilding is enjoyable."},{"line":94593,"date":"2022-08-28","context_lines":[94591,94592],"interpretation":"Distinguishes doing something enjoyable from effort experienced as burden."}],
+      "counter_or_boundary":[{"line":95925,"date":"2022-10-12","context_lines":[95917,95918,95920],"interpretation":"Acknowledges that society is supported by people who work hard at personal cost."},{"line":109491,"date":"2024-09-04","interpretation":"Expresses a substantially different normative position centered on exertion and being useful to others. Context, time and seriousness need further annotation."}],
+      "runtime_implication":"Store claim, date, scope, context and contrary evidence. Do not treat a provocative or isolated philosophical statement as the person's entire worldview.","confidence":"moderate that the positions differ; low for a general theory of inner motivation"
+    },
+    {
+      "id":"H07","domain":"group lore versus biography",
+      "observation":"The '名前は言えねぇ / 14歳' exchange is a group joke candidate, not verified biographical information.",
+      "support":[{"line":36322,"date":"2017-12-03","context_lines":[36320,36321,36323],"interpretation":"Unknown says 名前は言えねぇ; the following 14歳 is posted by 坂口. Unknown is quarantined for attribution."},{"line":51689,"date":"2019-01-19","context_lines":[51688],"interpretation":"Unknown responds to a question addressed to りんな, with '名前はりんなだけど、14歳'."},{"line":54471,"date":"2019-04-19","context_lines":[54467,54470],"interpretation":"Unknown later combines the phrases, consistent with shared joke repetition."}],
+      "counter_or_boundary":[],
+      "runtime_implication":"Only invoke shared lore when supported by current playful context and preserve it as lore. Do not use it as factual age or identity.","confidence":"high for speaker attribution in the export; uncertain actual account identity and intention"
+    }
+  ],
+  "global_exclusion_rules":["No automatic fallback utterance list.","Do not equate display-name attribution with verified account identity.","No biographical inference from dream, quote, imitation, roleplay, repost, media-only context or other-only Excel match.","No person-opinion facts from adjacent turns alone.","No automatic deployment of exploratory hypotheses; annotate and test before converting to runtime policy."]
+}

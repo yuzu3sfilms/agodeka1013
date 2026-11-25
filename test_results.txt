@@ -1,0 +1,98 @@
+test_address (__main__.Tests.test_address) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_api_error_no_fallback (__main__.Tests.test_api_error_no_fallback) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation failure: TimeoutError simulated
+generation path: v14_65_api_error
+ok
+test_chat_isolation_and_history (__main__.Tests.test_chat_isolation_and_history) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [1], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [1], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [3], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_direct_context_and_older_focus (__main__.Tests.test_direct_context_and_older_focus) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [1], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [1], 'action': 'answer', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_group_older_focus_explicit_rejected (__main__.Tests.test_group_older_focus_explicit_rejected) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': False, 'reason': 'low_information_or_private_exchange', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_participation_silence
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation path: v14_65_missing_current_address
+ok
+test_history_limit (__main__.Tests.test_history_limit) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [81], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_invalid_outputs_no_fallback (__main__.Tests.test_invalid_outputs_no_fallback) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation path: v14_65_invalid_evidence
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation path: v14_65_invalid_focus
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation path: v14_65_invalid_reply
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation path: v14_65_invalid_json
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation path: v14_65_intentional_silence
+ok
+test_observe_silent_and_explicit (__main__.Tests.test_observe_silent_and_explicit) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': False, 'reason': 'spontaneous_disabled', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_participation_silence
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [2], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'active_continuation', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [4], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_other_address_and_ack (__main__.Tests.test_other_address_and_ack) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': False, 'reason': 'other_addressee', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_participation_silence
+participation: {'reply': False, 'reason': 'ambiguous_addressee', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_participation_silence
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [3], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': False, 'reason': 'natural_closure', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation path: v14_65_participation_silence
+ok
+test_shutdown (__main__.Tests.test_shutdown) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_spontaneous_without_topic_gate (__main__.Tests.test_spontaneous_without_topic_gate) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': False, 'reason': 'low_information_or_private_exchange', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_participation_silence
+participation: {'reply': False, 'reason': 'low_information_or_private_exchange', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_participation_silence
+participation: {'reply': True, 'reason': 'spontaneous_sample', 'probability': 0.00518, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_65_integrated
+response_plan: {'focus_ids': [3], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_startup_and_evidence (__main__.Tests.test_startup_and_evidence) ... bot_init: {'version': 'v14.65', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.029s
+
+OK

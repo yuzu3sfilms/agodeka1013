@@ -1,0 +1,1 @@
+研究再構築: このディレクトリから `python build_persona_v14_65.py /path/to/LINE.txt --out ../ago_persona_v14_65.json` および `PYTHONPATH=.. python build_participation_v14_65.py /path/to/LINE.txt --out ../ago_participation_v14_65.json`。元のLINEエクスポートが必要。研究資料は暫定的で心理特性を直接検証したものではない。出典行は元エクスポートの1-based行番号。
