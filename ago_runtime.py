@@ -33,6 +33,22 @@ PERSON_OPINION_RE = re.compile(
 SHORT_PERSON_RE = re.compile(r"^(?:じゃあ|で、?|なら)?\s*(.+?)(?:のこと)?(?:は|って)?\s*[？?]*$")
 SELF_STATE_RE = re.compile(r"(?:自我|意識|感情).*(?:芽生|ある|持って|感じ)|(?:芽生|ある).*(?:自我|意識|感情)")
 CHOICE_RE = re.compile(r"^(?:どれ|どっち|どちら|どの(?:人|方|やつ)?)\s*[？?]*$")
+PERSON_DESCRIPTION_RE = re.compile(
+    r"^(?:じゃあ|で、?|なら)?\s*(.+?)(?:のこと)?(?:は|って)?\s*"
+    r"(?:どんな(?:人|やつ|奴)|どういう(?:人|やつ|奴))(?:だと思う|なの|なん|ですか)?\s*[？?。!！]*$"
+)
+PERSON_STATUS_RE = re.compile(
+    r"^(?:じゃあ|で、?|なら)?\s*(.+?)(?:は|って)?\s*(?:最近\s*)?"
+    r"(?:どう(?:なん|なの|してる|してん|ですか)?|元気(?:なの|なん|ですか)?|何してる)\s*[？?。!！]*$"
+)
+SELF_STATUS_RE = re.compile(r"^(?:最近\s*)?(?:どう(?:なん|なの|ですか)?|元気(?:なの|ですか)?|調子どう)\s*[？?。!！]*$")
+ACK_RE = re.compile(r"^(?:いいね|ええやん|良いね|よかった|よかったね|了解|りょ|おけ|おｋ|ok|なるほど|そっか|そうか|ふーん|ほーん)[！!。…~〜ｗw]*$", re.I)
+IDENTITY_NAME_RE = re.compile(r"^(?:名前(?:は|って)?|何て名前|なんて名前)(?:言える|何|なに|ですか)?\s*[？?。!！]*$")
+IDENTITY_AGE_RE = re.compile(r"^(?:年齢(?:は|って)?|何歳|なんさい)(?:何|なに|ですか)?\s*[？?。!！]*$")
+TOPIC_STOP_RUNS = {
+    "最近", "今回", "今日", "明日", "来週", "今週", "予定", "大丈夫", "自分", "俺", "おれ", "僕", "ぼく",
+    "どう", "何", "相手", "返事", "返答"
+}
 
 
 def norm(text: str) -> str:
@@ -45,13 +61,22 @@ def dialogue_act(text: str) -> str:
         return "empty"
     if SELF_STATE_RE.search(t):
         return "meta_self"
+    if ACK_RE.match(t):
+        return "acknowledgement"
+    if SELF_STATUS_RE.match(t):
+        return "self_status"
+    # Scheduling is the semantic task even when the user apologizes for being late.
+    # Tone (apology/playfulness) is handled separately.
+    if re.search(r"(?:何時|何分|\d{1,2}時|いつ|今日|明日|来週|今週|土曜|日曜|集合|予定|行ける|空いて|予約|遅れる|遅刻)", t):
+        if re.search(r"(?:でいい|で良い|で大丈夫|でも大丈夫|にしよう|にする|に変更|来週で|今週で)", t) or re.search(r"\d{1,2}時(?:半)?", t):
+            return "scheduling"
     if re.search(r"(?:ありがとう|ありがと|助かった|サンキュ|感謝)", t, re.I):
         return "thanks"
     if re.search(r"(?:ごめん|すみません|すまん|申し訳|遅れ|遅刻)", t):
         return "apology"
-    if re.search(r"(?:何時|何分|\d{1,2}時|いつ|今日|明日|来週|土曜|日曜|集合|予定|行ける|空いて|予約)", t):
+    if re.search(r"(?:何時|何分|\d{1,2}時|いつ|今日|明日|来週|今週|土曜|日曜|集合|予定|行ける|空いて|予約)", t):
         return "scheduling"
-    if re.search(r"(?:どう思|どう感じ|好き|嫌い|おすすめ|良いと思|いいと思)", t):
+    if re.search(r"(?:どう思|どう感じ|好き|嫌い|おすすめ|良いと思|いいと思|どんな(?:人|やつ|奴)|どういう(?:人|やつ|奴))", t):
         return "opinion"
     if re.search(r"(?:ww+|ｗｗ+|笑|草|ウケ|おもろ|面白)", t, re.I):
         return "banter"
@@ -68,7 +93,9 @@ def dialogue_form(text: str, act: str = "") -> str:
     t = (text or "").strip()
     a = act or dialogue_act(t)
     if a == "scheduling":
-        if re.search(r"(?:でいい|で良い|で大丈夫|にしよう|にする|で行こう|でいこう|それで|とりま.+で|まあ.+で|で決まり|でどう)", t):
+        if re.search(r"(?:やっぱ|変更|訂正|来週で|今週で)", t):
+            return "schedule_change"
+        if re.search(r"(?:でいい|で良い|で大丈夫|でも大丈夫|にしよう|にする|で行こう|でいこう|それで|とりま.+で|まあ.+で|で決まり|でどう)", t):
             return "schedule_proposal"
         if re.search(r"(?:何時|何分|いつ)", t):
             return "schedule_time_question"
@@ -79,6 +106,10 @@ def dialogue_form(text: str, act: str = "") -> str:
         return "schedule_general"
     if a == "meta_self":
         return "meta_yesno" if QUESTION_RE.search(t) else "meta_statement"
+    if a == "self_status":
+        return "self_status"
+    if a == "acknowledgement":
+        return "acknowledgement"
     if a == "opinion":
         return "opinion"
     if a == "yesno_question":
@@ -94,7 +125,9 @@ def tone_of(text: str, act: str = "") -> str:
     if a == "meta_self" or re.search(r"(?:ww+|ｗｗ+|笑|草|😂|😇|ｷｬ|きゃぴ)", t, re.I):
         return "playful"
     if a == "scheduling":
-        return "practical"
+        return "playful" if re.search(r"(?:ww+|ｗｗ+|笑|草|😂|😇)", t, re.I) else "practical"
+    if a == "acknowledgement":
+        return "terse"
     if len(t) <= 8:
         return "terse"
     return "ordinary"
@@ -109,6 +142,23 @@ def response_features(text: str) -> dict:
         "laughter": bool(re.search(r"(?:ww+|ｗｗ+|笑|草|😂|😇|ｷｬ|きゃぴ)", t, re.I)),
         "polite": bool(re.search(r"(?:です|ます|でした|ません|すみません|ありがとう)", t)),
     }
+
+
+def response_kind(text: str) -> str:
+    t=(text or "").strip()
+    if not t:
+        return "empty"
+    if re.fullmatch(r"(?:はい|あ、?はい|うん|了解|おっけー|🆗✌おっけー|ok)[。.!！]*", t, re.I):
+        return "accept"
+    if re.search(r"(?:無理|大丈夫じゃない|できない|行けない|厳しい|それはちょっと)", t):
+        return "reject"
+    if re.search(r"(?:わからない|分からない|知らない|全くわからない|微妙)", t):
+        return "unknown"
+    if re.search(r"[？?](?:$| / )", t):
+        return "question"
+    if re.fullmatch(r"(?:まあまあ|別に|ほーん|エ|え|はい|うん|了解|ｷｬﾋﾟｯ!?|ﾝ～…😇)[。.!！]*", t):
+        return "reaction"
+    return "comment"
 
 
 def topic_tokens(text: str) -> set[str]:
@@ -128,7 +178,7 @@ def topic_tokens(text: str) -> set[str]:
                 out.add(low)
                 out.add("@" + low)
             continue
-        if len(run) < 2:
+        if len(run) < 2 or run in TOPIC_STOP_RUNS:
             continue
         out.add("@" + run)
         for n in range(2, min(4, len(run)) + 1):
@@ -162,6 +212,9 @@ class DialogueState:
     last_target_label: str = ""
     last_predicate: str = ""
     last_partner: str = ""
+    last_reply_at: float = 0.0
+    last_spontaneous_at: float = 0.0
+    participation_closed: bool = False
 
 
 @dataclass
@@ -229,14 +282,14 @@ class PersonaArchive:
         if os.environ.get("AGO_PERSONA_ARCHIVE"):
             candidates.append(os.environ["AGO_PERSONA_ARCHIVE"])
         candidates += [
-            "data/ago_persona_archive_v14_54.json.gz",
-            "ago_persona_archive_v14_54.json.gz",
+            "data/ago_persona_archive_v14_55.json.gz",
+            "ago_persona_archive_v14_55.json.gz",
         ]
         for c in candidates:
             if c and os.path.exists(c):
                 return c
         raise FileNotFoundError(
-            "ago_persona_archive_v14_54.json.gz not found. Put it in data/ or repo root."
+            "ago_persona_archive_v14_55.json.gz not found. Put it in data/ or repo root."
         )
 
     def _build_indexes(self):
@@ -274,6 +327,19 @@ class PersonaArchive:
 
         # Distinctive actual short reactions used only as grounded fallbacks.
         self.reactions = [x.get("text", "") for x in self.short_reactions if x.get("text")]
+
+        # Semantic response bank. These are not canned answers written by us;
+        # they are actual Hashimoto replies grouped by what the reply *does*.
+        self.response_bank = defaultdict(list)
+        for e in self.raw_episodes + self.derived_episodes:
+            r=(e.get("reply") or "").strip()
+            if not r or len(r) > 80:
+                continue
+            self.response_bank[response_kind(r)].append(r)
+        for item in self.hashimoto_utterances:
+            r=(item.get("text") or "").strip()
+            if r and len(r) <= 80:
+                self.response_bank[response_kind(r)].append(r)
 
     def resolve_person(self, token: str, current_speaker: str = "") -> tuple[str, str]:
         raw = re.sub(r"^(?:じゃあ|で、?|なら|まあ|まぁ)\s*", "", token or "").strip(" \t、。！？?")
@@ -340,6 +406,51 @@ class PersonaArchive:
             bonus += 3
         return bonus
 
+    def _find_actual_utterance(self, preferred: list[str], contains: str = "") -> str:
+        corpus=[x.get("text", "").strip() for x in self.hashimoto_utterances if x.get("text")]
+        for p in preferred:
+            for x in corpus:
+                if x == p:
+                    return x
+        if contains:
+            for x in corpus:
+                if contains in x and len(x) <= 100:
+                    return x
+        return ""
+
+    def semantic_primitive(self, kind: str, tone: str = "ordinary") -> str:
+        if kind == "identity_name":
+            return self._find_actual_utterance(["名前は言えねぇ"]) or "名前は言えねぇ"
+        if kind == "identity_age":
+            x=self._find_actual_utterance(["14歳…。", "14歳"])
+            return "14歳" if x else "14歳"
+        if kind == "self_status":
+            return self._find_actual_utterance(["まあまあ", "別に"]) or "まあまあ"
+        if kind == "person_status_unknown":
+            x=self._find_actual_utterance([], contains="全くわからない")
+            if x:
+                m=re.search(r"([^/。]*どうしてるか、全くわからない[。.]?)", x)
+                if m:
+                    return m.group(1).strip()
+            return self._find_actual_utterance(["わからない", "分からない", "微妙。", "微妙"])
+        if kind == "schedule_accept":
+            prefs=["🆗✌おっけー", "うん", "はい", "はい。", "了解"] if tone == "playful" else ["うん", "はい", "はい。", "了解", "🆗✌おっけー"]
+            for p in prefs:
+                for r in self.response_bank.get("accept", []):
+                    if r == p:
+                        return r
+            vals=self.response_bank.get("accept", [])
+            return vals[0] if vals else "はい"
+        if kind == "safe_reaction":
+            prefs=["ほーん", "まあまあ", "エ", "別に", "ｷｬﾋﾟｯ!?"] if tone != "playful" else ["ｷｬﾋﾟｯ!?", "ﾝ～…😇", "ほーん", "エ"]
+            for p in prefs:
+                if any((x.get("text") or "").strip() == p for x in self.hashimoto_utterances):
+                    return p
+            for r in self.response_bank.get("reaction", []):
+                if len(r) <= 12 and not QUESTION_RE.search(r):
+                    return r
+        return "ｷｬﾋﾟｯ!?"
+
     def retrieve_episodes(
         self,
         current_text: str,
@@ -383,6 +494,16 @@ class PersonaArchive:
             stimulus = e.get("stimulus", "")
             eact = e.get("act") or dialogue_act(stimulus)
             eform = dialogue_form(stimulus, eact)
+            rkind = response_kind(e.get("reply", ""))
+
+            # Semantic response compatibility before lexical scoring.
+            if qform in {"schedule_proposal", "schedule_change"}:
+                if eform not in {"schedule_proposal", "schedule_change", "schedule_general", "schedule_availability"}:
+                    continue
+                if rkind not in {"accept", "reject", "comment"}:
+                    continue
+            if act == "self_status":
+                continue  # handled by a grounded semantic primitive, not lexical retrieval
 
             act_bonus = 0.0
             if eact == act:
@@ -423,9 +544,11 @@ class PersonaArchive:
             reply = e.get("reply", "")
             reply_topic = self._idf_score(q_last, topic_tokens(reply))
             schedule_bonus = 0.0
-            if qform == "schedule_proposal":
-                if re.fullmatch(r"(?:はい|あはい|うん|了解|おっけー?|ok)[。.!！]*", reply.strip(), re.I):
-                    schedule_bonus += 40.0
+            if qform in {"schedule_proposal", "schedule_change"}:
+                if rkind == "accept":
+                    schedule_bonus += 55.0
+                elif rkind == "reject":
+                    schedule_bonus += 8.0
                 if response_features(reply)["question"]:
                     schedule_bonus -= 8.0
                 if eform not in {"schedule_proposal", "schedule_general"}:
@@ -544,6 +667,9 @@ class MeaningResolver:
     def __init__(self, archive: PersonaArchive):
         self.archive = archive
 
+    def _resolve_explicit_person(self, token: str, current_speaker: str):
+        return self.archive.resolve_person(token, current_speaker)
+
     def resolve(self, text: str, state: DialogueState, current_speaker: str, is_group: bool) -> Meaning:
         raw = (text or "").strip()
         act = dialogue_act(raw)
@@ -551,19 +677,43 @@ class MeaningResolver:
 
         if SELF_STATE_RE.search(raw):
             return Meaning(raw, "self_state", predicate="self_state", act="meta_self")
+        if IDENTITY_NAME_RE.match(raw):
+            return Meaning(raw, "identity_name", predicate="identity", act="identity")
+        if IDENTITY_AGE_RE.match(raw):
+            return Meaning(raw, "identity_age", predicate="identity", act="identity")
+
+        # "最近どう？" asks Hashimoto himself; it is not a lexical search for 最近.
+        if SELF_STATUS_RE.match(raw):
+            return Meaning(raw, "self_status", predicate="status", act="self_status")
+
+        # "俺ってどんなやつ？" / "ムタってどんな人？"
+        m = PERSON_DESCRIPTION_RE.match(raw)
+        if m:
+            pid, label = self._resolve_explicit_person(m.group(1), current_speaker)
+            if pid:
+                return Meaning(raw, "person_opinion", pid, label, "opinion", False, True, True, "opinion")
+
+        # "せっきーは最近どうなん" asks current status, not an opinion.
+        m = PERSON_STATUS_RE.match(raw)
+        if m:
+            pid, label = self._resolve_explicit_person(m.group(1), current_speaker)
+            if pid:
+                return Meaning(raw, "person_status", pid, label, "status", False, True, True, "person_status")
 
         m = PERSON_OPINION_RE.match(raw)
         if m:
-            pid, label = self.archive.resolve_person(m.group(1), current_speaker)
+            pid, label = self._resolve_explicit_person(m.group(1), current_speaker)
             if pid:
                 return Meaning(raw, "person_opinion", pid, label, "opinion", False, True, True, "opinion")
             return Meaning(raw, "subject_opinion", "", label, "opinion", False, True, True, "opinion")
 
         sm = SHORT_PERSON_RE.match(raw)
-        if sm and state.last_intent == "person_opinion" and state.last_predicate == "opinion":
-            pid, label = self.archive.resolve_person(sm.group(1), current_speaker)
+        if sm and state.last_intent in {"person_opinion", "person_status"}:
+            pid, label = self._resolve_explicit_person(sm.group(1), current_speaker)
             if pid:
-                return Meaning(raw, "person_opinion", pid, label, "opinion", True, True, True, "opinion")
+                pred = "opinion" if state.last_intent == "person_opinion" else "status"
+                act2 = "opinion" if pred == "opinion" else "person_status"
+                return Meaning(raw, state.last_intent, pid, label, pred, True, True, True, act2)
 
         if CHOICE_RE.match(raw):
             recent = "\n".join(t.get("text", "") for t in state.turns[-5:])
@@ -576,6 +726,10 @@ class MeaningResolver:
             if not same_partner_continuation:
                 return Meaning(raw, "group_chatter", predicate="chat", should_reply=False, directed=False, act=act)
 
+        # Low-content acknowledgement is a natural conversation terminator. Do not
+        # force an unrelated historical reply merely because the bot can reply.
+        if act == "acknowledgement":
+            return Meaning(raw, "acknowledgement", predicate="ack", should_reply=False, directed=True, act=act)
         if act == "scheduling":
             return Meaning(raw, "scheduling", predicate="scheduling", act=act)
         if QUESTION_RE.search(raw):
@@ -595,114 +749,125 @@ class ContractBuilder:
     def __init__(self, archive: PersonaArchive):
         self.archive = archive
 
+    @staticmethod
+    def _synthetic_primary(source: str, stimulus: str, act: str, reply: str) -> dict:
+        return {
+            "id": source,
+            "source": source,
+            "context": [],
+            "last_speaker": "橋本新",
+            "stimulus": stimulus,
+            "act": act,
+            "reply": reply,
+            "features": response_features(reply),
+        }
+
     def build(self, meaning: Meaning, state: DialogueState, speaker: str) -> ResponseContract:
-        hits = self.archive.retrieve_episodes(
-            meaning.raw, state.turns, speaker, meaning.act, n=6
-        )
-        primary = hits[0].episode if hits else None
-        backups = [h.episode for h in hits[1:4]]
-        content_sources: list[str] = []
-
-        if meaning.intent == "person_opinion" and meaning.target_id:
-            content_sources = self.archive.person_evidence(meaning.target_id, n=8)
-            if content_sources:
-                # For a person-opinion question, a direct Hashimoto mention is a
-                # stronger content anchor than an unrelated generic opinion episode.
-                direct = content_sources[0]
-                primary = {
-                    "id": f"person:{meaning.target_id}",
-                    "source": "direct_person_mention",
-                    "context": [],
-                    "last_speaker": meaning.target_id,
-                    "stimulus": f"{meaning.target_label or meaning.target_id}について",
-                    "act": "opinion",
-                    "reply": direct,
-                    "features": response_features(direct),
-                }
-        elif meaning.intent in {"subject_opinion", "self_state"}:
-            statement_query = meaning.target_label or meaning.raw
-            statement_hits = self.archive.retrieve_statements(statement_query, n=5)
-            content_sources = [x[1] for x in statement_hits]
-            if meaning.intent == "subject_opinion" and statement_hits:
-                direct = statement_hits[0][1]
-                primary = {
-                    "id": "dataset:subject-opinion",
-                    "source": "ai_dataset_statement",
-                    "context": [],
-                    "last_speaker": "橋本新",
-                    "stimulus": statement_query,
-                    "act": "opinion",
-                    "reply": direct,
-                    "features": response_features(direct),
-                }
-
         tone = tone_of(meaning.raw, meaning.act)
-        replies = []
+        hits: list[EpisodeHit] = []
+        primary = None
+        backups: list[dict] = []
+        content_sources: list[str] = []
+        fallback = self.archive.semantic_primitive("safe_reaction", tone)
+        can_replay = False
+        confidence = "medium"
+
+        if meaning.intent in {"identity_name", "identity_age"}:
+            r=self.archive.semantic_primitive(meaning.intent, tone)
+            primary=self._synthetic_primary(f"semantic:{meaning.intent}", meaning.raw, "identity", r)
+            fallback=r; can_replay=True; confidence="high"
+
+        elif meaning.intent == "self_status":
+            r=self.archive.semantic_primitive("self_status", tone)
+            primary=self._synthetic_primary("semantic:self_status", "近況を聞かれた時", "self_status", r)
+            fallback=r; can_replay=True; confidence="high"
+
+        elif meaning.intent == "person_status" and meaning.target_id:
+            # Historical logs cannot establish the person's *current* status.
+            # Use Hashimoto's own unknown-status wording instead of fabricating facts.
+            content_sources=self.archive.person_evidence(meaning.target_id, n=6)
+            r=self.archive.semantic_primitive("person_status_unknown", tone) or self.archive.semantic_primitive("safe_reaction", tone)
+            primary=self._synthetic_primary("semantic:person_status_unknown", f"{meaning.target_label}の現在の様子を聞かれた時", "person_status", r)
+            fallback=r; can_replay=False; confidence="high"
+
+        elif meaning.intent == "scheduling" and dialogue_form(meaning.raw, meaning.act) in {"schedule_proposal", "schedule_change", "schedule_availability"}:
+            r=self.archive.semantic_primitive("schedule_accept", tone)
+            primary=self._synthetic_primary("semantic:schedule_accept", "予定変更・時刻提案への了承", "scheduling", r)
+            fallback=r; can_replay=True; confidence="high"
+            hits=self.archive.retrieve_episodes(meaning.raw, state.turns, speaker, meaning.act, n=6)
+            backups=[h.episode for h in hits[:3]]
+
+        else:
+            hits = self.archive.retrieve_episodes(meaning.raw, state.turns, speaker, meaning.act, n=6)
+            primary = hits[0].episode if hits else None
+            backups = [h.episode for h in hits[1:4]]
+
+            if meaning.intent == "person_opinion" and meaning.target_id:
+                content_sources = self.archive.person_evidence(meaning.target_id, n=8)
+                if content_sources:
+                    direct = content_sources[0]
+                    primary = self._synthetic_primary(
+                        f"person:{meaning.target_id}",
+                        f"{meaning.target_label or meaning.target_id}について",
+                        "opinion",
+                        direct,
+                    )
+                    fallback = direct.split(" / ", 1)[0].strip() or fallback
+                    evaluative = bool(re.search(r"(?:最高|かっこいい|凄い|すごい|流石|センス|偉い|尊敬|天才|優し|好き|面白|賢い|上手い)", direct))
+                    can_replay = len(direct) <= 30 and evaluative and not re.findall(r"\d+", direct)
+                    confidence="high"
+
+            elif meaning.intent in {"subject_opinion", "self_state"}:
+                statement_query = meaning.target_label or meaning.raw
+                statement_hits = self.archive.retrieve_statements(statement_query, n=5)
+                content_sources = [x[1] for x in statement_hits]
+                if meaning.intent == "subject_opinion" and statement_hits:
+                    direct = statement_hits[0][1]
+                    primary = self._synthetic_primary("dataset:subject-opinion", statement_query, "opinion", direct)
+                if meaning.intent == "self_state" and primary:
+                    rr=(primary.get("reply") or "").strip()
+                    if rr and len(rr)<=30:
+                        fallback=rr
+                        can_replay=True
+                        confidence="high"
+
+            # No raw archive reply is ever used as a blind fallback. If the
+            # minimal editor drifts, fall back to a topic-free Hashimoto reaction.
+            if primary and not can_replay:
+                rr=(primary.get("reply") or "").strip()
+                if meaning.intent == "person_opinion" and content_sources:
+                    fallback=content_sources[0].split(" / ",1)[0].strip() or fallback
+
+            top_topic = hits[0].topic_score if hits else 0.0
+            if top_topic >= 18:
+                confidence = "high"
+            elif top_topic > 0:
+                confidence = max(confidence, "medium")
+
+        replies=[]
         if primary and primary.get("reply"):
             replies.append(primary.get("reply", ""))
-        replies.extend(h.episode.get("reply", "") for h in hits if h.episode.get("reply"))
-        target_chars = int(median([min(len(x), 120) for x in replies])) if replies else 18
-        target_chars = max(4, min(target_chars, 90))
-        fallback = self.archive.portable_fallback(hits, meaning.raw, tone)
-        if meaning.intent == "person_opinion" and content_sources:
-            direct_piece = content_sources[0].split(" / ", 1)[0].strip()
-            if direct_piece and len(direct_piece) <= 60:
-                fallback = direct_piece
-        if meaning.intent == "self_state" and fallback:
-            for h in hits:
-                if (h.episode.get("reply") or "").strip() == fallback.strip():
-                    primary = h.episode
-                    break
+        replies.extend(h.episode.get("reply", "") for h in hits[:4] if h.episode.get("reply"))
+        target_chars=int(median([min(len(x),120) for x in replies])) if replies else 12
+        target_chars=max(2,min(target_chars,70))
 
-        top_topic = hits[0].topic_score if hits else 0.0
-        if top_topic >= 18:
-            confidence = "high"
-        elif top_topic > 0 or (hits and meaning.act in {"meta_self", "thanks", "apology", "short_reaction"}):
-            confidence = "medium"
-        else:
-            confidence = "low"
-
-        can_replay = False
-        if primary:
-            reply = primary.get("reply", "")
-            portable = self.archive._portable_penalty(reply, meaning.raw) == 0 and len(reply) <= 30
-            if meaning.intent == "person_opinion" and primary.get("source") == "direct_person_mention":
-                evaluative = bool(re.search(r"(?:最高|かっこいい|凄い|すごい|流石|センス|偉い|尊敬|天才|優し|好き|面白|賢い|上手い)", reply))
-                # The direct source may use the person's historic nickname (e.g. ムタァ)
-                # or canonical name even when the current user says 俺. That is desired.
-                no_new_numbers = not re.findall(r"\d+", reply)
-                can_replay = len(reply) <= 30 and evaluative and no_new_numbers
-            else:
-                can_replay = portable and meaning.intent not in {"subject_opinion", "question", "scheduling"} and meaning.act in {
-                    "meta_self", "banter", "short_reaction", "thanks", "apology"
-                }
-
-        debug = {
+        debug={
             "archive": self.archive.source_meta,
+            "semantic_form": dialogue_form(meaning.raw, meaning.act),
+            "fallback": fallback,
             "top_hits": [
-                {
-                    "id": h.episode.get("id"),
-                    "source": h.episode.get("source"),
-                    "score": round(h.score, 2),
-                    "topic_score": round(h.topic_score, 2),
-                    "stimulus": h.episode.get("stimulus", "")[:100],
-                    "reply": h.episode.get("reply", "")[:140],
-                }
+                {"id":h.episode.get("id"),"source":h.episode.get("source"),"score":round(h.score,2),
+                 "topic_score":round(h.topic_score,2),"stimulus":h.episode.get("stimulus","")[:100],
+                 "reply":h.episode.get("reply","")[:140],"reply_kind":response_kind(h.episode.get("reply",""))}
                 for h in hits[:4]
             ],
-            "content_sources": [x[:160] for x in content_sources[:4]],
+            "content_sources":[x[:160] for x in content_sources[:4]],
         }
         return ResponseContract(
-            meaning=meaning,
-            primary=primary,
-            backups=backups,
-            content_sources=content_sources,
-            fallback=fallback,
-            target_chars=target_chars,
-            tone=tone,
-            source_confidence=confidence,
-            can_replay=can_replay,
-            debug=debug,
+            meaning=meaning, primary=primary, backups=backups,
+            content_sources=content_sources, fallback=fallback,
+            target_chars=target_chars, tone=tone,
+            source_confidence=confidence, can_replay=can_replay, debug=debug,
         )
 
 
@@ -724,6 +889,8 @@ class PersonaGate:
         a = (answer or "").strip()
         if not a:
             return False, "empty"
+        if re.fullmatch(r"[（(]?(?:返答|回答)?なし[）)]?", a):
+            return False, "placeholder_no_reply"
         if len(a) > max(80, contract.target_chars * 3):
             return False, "too_long"
         if cls.GENERIC_AI_RE.search(a):
@@ -748,6 +915,19 @@ class PersonaGate:
             threshold = 0.14 if len(a) <= 18 else 0.20 if len(a) <= 45 else 0.27
             if best < threshold:
                 return False, f"too_far_from_archive:{best:.2f}"
+
+        # A historical reply is a style/template source, not permission to copy
+        # its unrelated subject matter. E.g. a guitar turn may borrow the "沼"
+        # construction but must not leak the historical reply's 筋トレ topic.
+        if contract.primary and contract.primary.get("source") in {"line_raw", "reply_pairs"}:
+            cur_exact={t for t in topic_tokens(user_text) if t.startswith("@")}
+            stim_exact={t for t in topic_tokens(contract.primary.get("stimulus", "")) if t.startswith("@")}
+            src_exact={t for t in topic_tokens(contract.primary.get("reply", "")) if t.startswith("@")}
+            ans_exact={t for t in topic_tokens(a) if t.startswith("@")}
+            introduced=(src_exact - stim_exact) & ans_exact
+            leaked=[t for t in introduced if t not in cur_exact]
+            if leaked:
+                return False, "source_topic_leak:" + ",".join(sorted(leaked)[:3])
 
         allowed_numbers = set(re.findall(r"\d+", user_text or ""))
         for src in sources:

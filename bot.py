@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import threading
+import time
+from participation import ParticipationModel
 from collections import defaultdict
 
 from openai import OpenAI
@@ -28,12 +30,12 @@ try:
 except Exception:
     SpeakerResolver = None
 
-PROJECT_VERSION = "v14.54"
+PROJECT_VERSION = "v14.56"
 ERROR_FALLBACK = "ｷｬﾋﾟｨ"
 
 
 class AgoHashimotoBot:
-    """Project AGO v14.54 — archive-native persona core.
+    """Project AGO v14.56 — archive-native persona core.
 
     The model is not asked to invent Hashimoto's personality from a prompt.
     Real historical episodes and self-expression data determine the response
@@ -50,6 +52,7 @@ class AgoHashimotoBot:
         self.archive = PersonaArchive()
         self.resolver = MeaningResolver(self.archive)
         self.contracts = ContractBuilder(self.archive)
+        self.participation = ParticipationModel()
         self.states = defaultdict(DialogueState)
         self.locks = defaultdict(threading.RLock)
         self.shutdown_store = ShutdownStateStore()
@@ -63,6 +66,7 @@ class AgoHashimotoBot:
             "derived_context_episodes": len(self.archive.derived_episodes),
             "ai_dataset_statements": len(self.archive.self_statements),
             "hashimoto_utterances": len(self.archive.hashimoto_utterances),
+            "participation_training": self.participation.base,
         }, flush=True)
 
     def set_shutdown(self, chat_id: str, value: bool = True):
@@ -126,6 +130,7 @@ class AgoHashimotoBot:
 
 仕事は1つだけです。
 PRIMARYの橋本新の実返答を、現在の会話に必要な最小限だけ編集して返してください。
+PRIMARYに現在の発言には存在しない固有の話題・人物・場所・予定が含まれる場合、その内容は必ず削除または現在の話題へ置換します。文型・テンポだけを移植します。
 PRIMARYが内容的に使えない場合だけBACKUPを使います。
 人物・価値観については「本人発言の内容根拠」を優先します。
 
@@ -158,6 +163,10 @@ PRIMARYが内容的に使えない場合だけBACKUPを使います。
                 "抽象的な意見。本人データセットに該当する本人発言があれば、"
                 "その考え方と言葉を優先し、一般論を作らない。"
             )
+        elif m.intent == "self_status":
+            intent_rule = "近況質問。PRIMARYの短い本人反応をそのまま使う。過去の具体的出来事を現在の近況として捏造しない。"
+        elif m.intent == "person_status":
+            intent_rule = "人物の現在の近況。過去ログから現在の状態を断定しない。PRIMARYの『現在は分からない』型の本人表現を対象人物に合わせて最小編集する。"
         elif m.intent == "ambiguous_followup":
             intent_rule = "直前に選択肢がなければ勝手に選択肢を作らない。短く聞き返す。"
         elif m.intent == "scheduling":
@@ -240,17 +249,34 @@ PRIMARYの橋本新の返答を「別人が自然に書き直す」のではな�
 
             state = self.states[chat_id]
             speaker = self._speaker(sender_id, sender_display_name)
-            meaning = self.resolver.resolve(
-                user_text, state, speaker, self._is_group(chat_id)
+            now = time.time()
+            is_group = self._is_group(chat_id)
+            decision = self.participation.decide(
+                user_text, state, speaker, is_group, self.archive.alias_to_name, now
             )
-            print("meaning:", meaning.__dict__, flush=True)
-
-            if not meaning.should_reply:
-                state.turns.append({"role": "user", "text": user_text, "speaker": speaker})
+            print("participation:", decision, flush=True)
+            def clear_semantics():
+                state.last_intent = state.last_target_id = state.last_target_label = state.last_predicate = ""
+            def observe():
+                state.turns.append({"role":"user", "text":user_text, "speaker":speaker, "at":now})
                 if len(state.turns) > self.max_history * 2:
                     del state.turns[:-self.max_history * 2]
-                print("generation path: v14_54_archive_silence", flush=True)
+            if not decision["reply"]:
+                observe()
+                # Silence is still part of the conversation, but does not confer ownership.
+                clear_semantics()
+                state.participation_closed = True
+                print("generation path: v14_56_participation_silence", flush=True)
                 return None
+            # A new conversation or intervening human turn cannot inherit an old predicate.
+            if (is_group and not decision["continuation"]) or state.participation_closed or (
+                state.last_reply_at and now-state.last_reply_at>1800
+            ) or (state.last_partner and state.last_partner!=speaker):
+                clear_semantics()
+            # Ownership has already been established. The resolver only handles meaning.
+            meaning = self.resolver.resolve(user_text, state, speaker, False)
+            meaning.should_reply = True
+            print("meaning:", meaning.__dict__, flush=True)
 
             contract = self.contracts.build(meaning, state, speaker)
             dbg = contract.debug
@@ -259,6 +285,8 @@ PRIMARYの橋本新の返答を「別人が自然に書き直す」のではな�
                 "tone": contract.tone,
                 "target_chars": contract.target_chars,
                 "can_replay": contract.can_replay,
+                "semantic_form": dbg.get("semantic_form"),
+                "fallback": dbg.get("fallback"),
                 "top_hits": dbg.get("top_hits", [])[:3],
                 "content_sources": dbg.get("content_sources", [])[:3],
             }, flush=True)
@@ -266,13 +294,17 @@ PRIMARYの橋本新の返答を「別人が自然に書き直す」のではな�
             answer, path, gate = self._generate(contract, state, speaker)
             answer = self._clean(answer) or ERROR_FALLBACK
 
-            state.turns.append({"role": "user", "text": user_text, "speaker": speaker})
-            state.turns.append({"role": "assistant", "text": answer})
+            observe()
+            state.turns.append({"role": "assistant", "text": answer, "at": now})
+            state.last_reply_at = now
+            state.participation_closed = False
+            if decision["reason"] == "spontaneous_sample":
+                state.last_spontaneous_at = now
             if len(state.turns) > self.max_history * 2:
                 del state.turns[:-self.max_history * 2]
             self.resolver.commit(state, meaning, speaker)
 
-            print("generation path:", f"v14_54_{path}", flush=True)
+            print("generation path:", f"v14_56_{path}", flush=True)
             print("persona_gate:", gate, flush=True)
             print("reply:", answer, flush=True)
             return answer

@@ -1,0 +1,139 @@
+{
+  "schema": "ago-participation-v14-56",
+  "base": [
+    36164,
+    2075
+  ],
+  "counts": {
+    "act:short_reaction": [
+      17796,
+      858
+    ],
+    "topic:other": [
+      33939,
+      1902
+    ],
+    "active:0": [
+      31216,
+      447
+    ],
+    "continuing:0": [
+      35521,
+      1597
+    ],
+    "speaker:Reiji Shioda": [
+      11355,
+      916
+    ],
+    "act:statement": [
+      11146,
+      699
+    ],
+    "speaker:Ryo Sekiguchi": [
+      2428,
+      79
+    ],
+    "act:yesno_question": [
+      3295,
+      264
+    ],
+    "speaker:村田": [
+      11213,
+      553
+    ],
+    "speaker:坂口": [
+      8687,
+      487
+    ],
+    "act:banter": [
+      756,
+      41
+    ],
+    "topic:humor": [
+      836,
+      47
+    ],
+    "act:wh_question": [
+      1363,
+      97
+    ],
+    "speaker:中山 貴文": [
+      1649,
+      26
+    ],
+    "topic:hobby": [
+      306,
+      14
+    ],
+    "act:scheduling": [
+      1415,
+      83
+    ],
+    "topic:plans": [
+      251,
+      16
+    ],
+    "act:acknowledgement": [
+      98,
+      6
+    ],
+    "topic:food": [
+      656,
+      51
+    ],
+    "act:thanks": [
+      44,
+      3
+    ],
+    "topic:fitness": [
+      176,
+      45
+    ],
+    "act:apology": [
+      50,
+      3
+    ],
+    "act:opinion": [
+      174,
+      21
+    ],
+    "speaker:LINE英語通訳": [
+      114,
+      0
+    ],
+    "speaker:LINE中国語通訳": [
+      108,
+      0
+    ],
+    "speaker:りんな": [
+      456,
+      13
+    ],
+    "active:1": [
+      4948,
+      1628
+    ],
+    "continuing:1": [
+      643,
+      478
+    ],
+    "speaker:LINE中国語（繁）通訳": [
+      143,
+      0
+    ],
+    "act:empty": [
+      21,
+      0
+    ]
+  },
+  "heldout": [
+    7821,
+    173
+  ],
+  "heldout_active": [
+    406,
+    118
+  ],
+  "parsed_messages": 99734,
+  "definition": "next distinct sender is AGO within 5 minutes; chronological 80/20 split; explicit calls excluded; no read receipts"
+}
