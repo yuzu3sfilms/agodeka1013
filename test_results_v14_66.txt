@@ -1,0 +1,189 @@
+test_413_and_429 (test_v14_66.Tests.test_413_and_429) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 3383, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 1, 'hypotheses': 9, 'evidence_count': 0}
+generation failure: RuntimeError simulated provider limit
+generation path: v14_66_api_error
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 3473, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 2, 'hypotheses': 9, 'evidence_count': 0}
+generation failure: RuntimeError simulated provider limit
+generation path: v14_66_api_error
+ok
+test_address (test_v14_66.Tests.test_address) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_api_error_no_fallback (test_v14_66.Tests.test_api_error_no_fallback) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 3382, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 1, 'hypotheses': 9, 'evidence_count': 0}
+generation failure: TimeoutError simulated
+generation path: v14_66_api_error
+ok
+test_budget_exhaustion_cross_chat (test_v14_66.Tests.test_budget_exhaustion_cross_chat) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'status': 'local_budget_exhausted', 'available': 1000, 'cap': 1000}
+generation path: v14_66_local_budget_exhausted
+ok
+test_chat_isolation_and_history (test_v14_66.Tests.test_chat_isolation_and_history) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 3380, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 1, 'hypotheses': 9, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [1], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 3383, 'request_cap': 4200, 'available_before': 5926, 'completion': 768, 'history_count': 1, 'hypotheses': 9, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [1], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation budget: {'estimate_upper_proxy': 4019, 'request_cap': 4200, 'available_before': 4252, 'completion': 768, 'history_count': 2, 'hypotheses': 9, 'evidence_count': 2}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [3], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_direct_context_and_older_focus (test_v14_66.Tests.test_direct_context_and_older_focus) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 3802, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 1, 'hypotheses': 9, 'evidence_count': 1}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [1], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation budget: {'estimate_upper_proxy': 4168, 'request_cap': 4200, 'available_before': 5926, 'completion': 768, 'history_count': 3, 'hypotheses': 9, 'evidence_count': 2}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [1], 'action': 'answer', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_dynamic_evidence (test_v14_66.Tests.test_dynamic_evidence) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_evidence_not_sent_rejected (test_v14_66.Tests.test_evidence_not_sent_rejected) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_group_older_focus_explicit_rejected (test_v14_66.Tests.test_group_older_focus_explicit_rejected) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': False, 'reason': 'low_information_or_private_exchange', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_66_participation_silence
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 3472, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 2, 'hypotheses': 9, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_missing_current_address
+ok
+test_history_limit (test_v14_66.Tests.test_history_limit) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 4128, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 14, 'hypotheses': 7, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [81], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_invalid_outputs_no_fallback (test_v14_66.Tests.test_invalid_outputs_no_fallback) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 3382, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 1, 'hypotheses': 9, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_invalid_evidence
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 3469, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 2, 'hypotheses': 9, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_invalid_focus
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 3556, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 3, 'hypotheses': 9, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_invalid_reply
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 3643, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 4, 'hypotheses': 9, 'evidence_count': 0}
+generation path: v14_66_invalid_json
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 3597, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 5, 'hypotheses': 8, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_intentional_silence
+ok
+test_large_current (test_v14_66.Tests.test_large_current) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 3859, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 1, 'hypotheses': 0, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [1], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_large_japanese_history (test_v14_66.Tests.test_large_japanese_history) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 4123, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 1, 'hypotheses': 9, 'evidence_count': 2}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [61], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_observe_silent_and_explicit (test_v14_66.Tests.test_observe_silent_and_explicit) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': False, 'reason': 'spontaneous_disabled', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_66_participation_silence
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 3915, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 2, 'hypotheses': 9, 'evidence_count': 1}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [2], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'active_continuation', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation budget: {'estimate_upper_proxy': 3978, 'request_cap': 4200, 'available_before': 5926, 'completion': 768, 'history_count': 4, 'hypotheses': 8, 'evidence_count': 1}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [4], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_other_address_and_ack (test_v14_66.Tests.test_other_address_and_ack) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': False, 'reason': 'other_addressee', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_66_participation_silence
+participation: {'reply': False, 'reason': 'ambiguous_addressee', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_66_participation_silence
+participation: {'reply': True, 'reason': 'direct_address', 'probability': None, 'active': False, 'continuation': False, 'called': True}
+generation budget: {'estimate_upper_proxy': 4106, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 3, 'hypotheses': 9, 'evidence_count': 2}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [3], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': False, 'reason': 'natural_closure', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation path: v14_66_participation_silence
+ok
+test_rolling_budget_and_backoff (test_v14_66.Tests.test_rolling_budget_and_backoff) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_shared_budget_without_usage (test_v14_66.Tests.test_shared_budget_without_usage) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_shutdown (test_v14_66.Tests.test_shutdown) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_spontaneous_without_topic_gate (test_v14_66.Tests.test_spontaneous_without_topic_gate) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': False, 'reason': 'low_information_or_private_exchange', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_66_participation_silence
+participation: {'reply': False, 'reason': 'low_information_or_private_exchange', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation path: v14_66_participation_silence
+participation: {'reply': True, 'reason': 'spontaneous_sample', 'probability': 0.00518, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 4113, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 3, 'hypotheses': 9, 'evidence_count': 2}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [3], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+test_startup_and_evidence (test_v14_66.Tests.test_startup_and_evidence) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+ok
+test_three_logged_inputs (test_v14_66.Tests.test_three_logged_inputs) ... bot_init: {'version': 'v14.66', 'hypotheses': 9, 'evidence': 49, 'participation_training': [34865, 849]}
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': False, 'continuation': False, 'called': False}
+generation budget: {'estimate_upper_proxy': 3383, 'request_cap': 4200, 'available_before': 7600, 'completion': 768, 'history_count': 1, 'hypotheses': 9, 'evidence_count': 0}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [1], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation budget: {'estimate_upper_proxy': 4130, 'request_cap': 4200, 'available_before': 5926, 'completion': 768, 'history_count': 3, 'hypotheses': 9, 'evidence_count': 2}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [3], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+participation: {'reply': True, 'reason': 'direct_chat', 'probability': None, 'active': True, 'continuation': True, 'called': False}
+generation budget: {'estimate_upper_proxy': 4197, 'request_cap': 4200, 'available_before': 4252, 'completion': 768, 'history_count': 5, 'hypotheses': 7, 'evidence_count': 2}
+generation usage: {'prompt_tokens': 650, 'completion_tokens': 90, 'total_tokens': 740}
+generation path: v14_66_integrated
+response_plan: {'focus_ids': [5], 'action': 'comment', 'evidence_ids': [], 'validation': 'valid_structure'}
+reply: テスト応答です。
+ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 0.057s
+
+OK
